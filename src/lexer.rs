@@ -5,7 +5,7 @@ pub enum TokenType {
     Identifier(String),
 
     // Constants
-    IntLiteral(u64),
+    IntLiteral(i64),
 
     // Keywords
     IntKeyword,
@@ -18,19 +18,22 @@ pub enum TokenType {
     OpenBrace,
     CloseBrace,
     Semicolon,
+
+    // End of file
+    EndOfFile,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
-    pub token: TokenType,
+    pub token_type: TokenType,
     pub line: usize,
     pub column: usize,
 }
 
 impl Token {
-    pub fn new(token: TokenType, line: usize, column: usize) -> Self {
+    pub fn new(token_type: TokenType, line: usize, column: usize) -> Self {
         Token {
-            token,
+            token_type,
             line,
             column,
         }
@@ -143,7 +146,7 @@ pub fn tokenize(input: &str) -> (Vec<Token>, Vec<LexError>) {
                         start_column,
                     )),
                 }
-            }
+            },
             '0'..='9' => {
                 // Integer literals
                 let mut number = String::new();
@@ -166,7 +169,7 @@ pub fn tokenize(input: &str) -> (Vec<Token>, Vec<LexError>) {
                     }
                 }
                 if !error {
-                    let value = number.parse::<u64>().unwrap();
+                    let value = number.parse::<i64>().unwrap();
                     let start_column = lexer.column - number.len();
                     tokens.push(Token::new(
                         TokenType::IntLiteral(value),
@@ -174,16 +177,13 @@ pub fn tokenize(input: &str) -> (Vec<Token>, Vec<LexError>) {
                         start_column,
                     ));
                 }
-            }
+            },
             '(' => tokens.push(Token::new(TokenType::OpenParen, lexer.row, lexer.column)),
             ')' => tokens.push(Token::new(TokenType::CloseParen, lexer.row, lexer.column)),
             '{' => tokens.push(Token::new(TokenType::OpenBrace, lexer.row, lexer.column)),
             '}' => tokens.push(Token::new(TokenType::CloseBrace, lexer.row, lexer.column)),
             ';' => tokens.push(Token::new(TokenType::Semicolon, lexer.row, lexer.column)),
-            '\n' => {
-                lexer.next();
-            }
-            _ if c.is_whitespace() => {}
+            _ if c.is_whitespace() || c == '\n' => {} // \n is handled in next()
             _ => {
                 errors.push(LexError::InvalidCharacter {
                     ch: c,
@@ -193,6 +193,9 @@ pub fn tokenize(input: &str) -> (Vec<Token>, Vec<LexError>) {
             }
         }
     }
+
+    // End of file token
+    tokens.push(Token::new(TokenType::EndOfFile, lexer.row, lexer.column));
 
     (tokens, errors)
 }
