@@ -1,10 +1,14 @@
+mod ast;
 mod cli;
 mod lexer;
+mod parser;
+
+use crate::parser::{parse, ParseError};
 
 use crate::cli::Cli;
-use crate::lexer::{tokenize, LexError};
+use crate::lexer::tokenize;
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{exit, Command};
 
 fn main() {
@@ -70,10 +74,10 @@ fn compile(
         preprocessed_file.file_name().unwrap().to_str().unwrap()
     ));
 
-    let (tokens, errors) = tokenize(&std::fs::read_to_string(preprocessed_file).unwrap());
+    let (tokens, lex_errors) = tokenize(&std::fs::read_to_string(preprocessed_file).unwrap());
 
-    if !errors.is_empty() {
-        for error in errors {
+    if !lex_errors.is_empty() {
+        for error in lex_errors {
             eprintln!("Lexical error: {}", error);
         }
         exit(1);
@@ -82,7 +86,16 @@ fn compile(
     if finish_at_lexing {
         return tmp_assembly;
     }
-    // todo Parse and compile
+
+    let ast = parse(tokens).unwrap_or_else(|parse_error| {
+        eprintln!("Parsing error: {}", parse_error);
+        std::process::exit(1);
+    });
+
+    // todo: Add a flag to print the AST
+    println!("{}", ast);
+
+    // todo  compile
 
     tmp_assembly
 }
