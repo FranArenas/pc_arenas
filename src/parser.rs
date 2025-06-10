@@ -6,31 +6,20 @@ use crate::ast::{Expression, FunctionDefinition, ProgramAst, Statement};
 use crate::lexer::{Token, TokenType};
 
 #[derive(Debug, Clone)]
-pub enum ParseError {
-    UnexpectedToken {
-        expected: TokenType,
-        found: Token,
-        position: usize,
-        message: String,
-    },
+pub struct ParseError {
+    pub expected: TokenType,
+    pub found: Token,
+    pub position: usize,
+    pub message: String,
 }
 
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ParseError::UnexpectedToken {
-                expected,
-                found,
-                position,
-                message,
-            } => {
-                write!(
-                    f,
-                    "Unexpected token error at position {}: expected {:?}, found {:?}. Message Error: {}",
-                    position, expected, found.token_type, message // todo: Improve formatting for found token printing the expected value
-                )
-            }
-        }
+        write!(
+            f,
+            "Unexpected token error at position {}: expected {:?}, found {:?}. Message Error: {}",
+            self.position, self.expected, self.found.token_type, self.message
+        )
     }
 }
 
@@ -100,8 +89,8 @@ impl<'a> Parser<'a> {
         let expression = match token.token_type {
             TokenType::IntLiteral(value) => Ok(Expression::Constant(value)),
             _ => {
-                Err(ParseError::UnexpectedToken {
-                    expected: TokenType::IntLiteral(0), // 0 acts as a placeholder
+                Err(ParseError {
+                    expected: TokenType::IntLiteral(0), // Placeholder
                     found: token.clone(),
                     position: self.current,
                     message: "Unexpected token".to_string(),
@@ -115,24 +104,9 @@ impl<'a> Parser<'a> {
     }
 
     fn consume(&mut self, expected: TokenType, message: &str) -> Result<TokenType, ParseError> {
-        match self.check(&expected) {
-            Ok(_) => { /* all good, continue */ }
-
-            Err(err) => match err {
-                ParseError::UnexpectedToken {
-                    expected,
-                    found,
-                    position,
-                    ..
-                } => {
-                    return Err(ParseError::UnexpectedToken {
-                        expected,
-                        found,
-                        position,
-                        message: message.to_string(),
-                    });
-                }
-            },
+        if let Err(mut err) = self.check(&expected) {
+            err.message = message.to_string();
+            return Err(err);
         }
 
         let consumed_token = Ok(self.current_token()?.token_type.clone());
@@ -154,7 +128,7 @@ impl<'a> Parser<'a> {
         };
 
         if !is_expected {
-            return Err(ParseError::UnexpectedToken {
+            return Err(ParseError {
                 expected: expected.clone(),
                 found: self.current_token()?.clone(),
                 position: self.current,
