@@ -19,7 +19,7 @@ fn main() {
     let tmp_preprocessed = preprocess(&cli.file);
 
     // Compile the preprocessed file
-    let tmp_assembly = compile(&tmp_preprocessed, cli.lex, cli.parse, cli.codegen);
+    let tmp_assembly = compile(&tmp_preprocessed, cli.lex, cli.parse, cli.codegen, cli.print_ast);
 
     // Check if the user wants to stop after lexing, parsing, or code generation
     if cli.lex || cli.parse || cli.codegen {
@@ -68,6 +68,7 @@ fn compile(
     finish_at_lexing: bool,
     finish_at_parsing: bool,
     finish_at_codegen: bool,
+    print_ast: bool,
 ) -> PathBuf {
     let tmp_assembly: PathBuf = env::temp_dir().join(format!(
         "{}_compiled.s",
@@ -93,8 +94,9 @@ fn compile(
     });
 
     // todo: Add a flag to print the AST
-    println!("{}", ast);
-
+    if print_ast {
+        println!("{}", ast);
+    }
     // todo  compile
 
     tmp_assembly

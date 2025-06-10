@@ -25,6 +25,10 @@ pub struct Cli {
     #[arg(long = "parse")]
     pub parse: bool,
 
+    /// Stop after printing the AST
+    #[arg(long = "print-ast", default_value_t = true)]
+    pub print_ast: bool,
+
     /// Stop after code generation
     #[arg(long = "codegen")]
     pub codegen: bool,
