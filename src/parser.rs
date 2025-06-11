@@ -1,5 +1,3 @@
-// todo: In this state the synchronization is not implemented, so we will stop parsing on the first error.
-// In the future, we will implement a way to recover from errors and continue parsing using all the methods like peek, advance, and consume.
 use std::fmt;
 
 use crate::ast::{Expression, FunctionDefinition, ProgramAst, Statement};
@@ -26,23 +24,37 @@ impl fmt::Display for ParseError {
 struct Parser<'a> {
     tokens: &'a [Token],
     current: usize,
+    errors: Vec<ParseError>,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(tokens: &'a [Token]) -> Self {
-        Self { tokens, current: 0 }
+        Self {
+            tokens,
+            current: 0,
+            errors: Vec::new(),
+        }
     }
 
-    pub fn parse(mut self) -> Result<ProgramAst, ParseError> {
-        let function_definition = self.parse_function_definition();
-        if function_definition.is_err() {
-            return Err(function_definition.err().unwrap());
+    pub fn parse(mut self) -> Result<ProgramAst, Vec<ParseError>> {
+        match self.parse_function_definition() {
+            Ok(function_definition) => {
+                if let Err(err) = self.consume(TokenType::EndOfFile, "Expected end of file") {
+                    self.errors.push(err);
+                }
+
+                if !self.errors.is_empty() {
+                    return Err(self.errors);
+                }
+
+                Ok(ProgramAst::Program(function_definition))
+            }
+            Err(err) => {
+                // TODO: Synchronize here once there are more cases apart from function definition
+                self.errors.push(err);
+                Err(self.errors)
+            }
         }
-        let function_definition = function_definition.unwrap();
-
-        self.consume(TokenType::EndOfFile, "Expected end of file")?;
-
-        Ok(ProgramAst::Program(function_definition))
     }
 
     fn parse_function_definition(&mut self) -> Result<FunctionDefinition, ParseError> {
@@ -84,23 +96,24 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expression(&mut self) -> Result<Expression, ParseError> {
-        let token = self.current_token()?;
+        let token = self.current_token();
 
         let expression = match token.token_type {
-            TokenType::IntLiteral(value) => Ok(Expression::Constant(value)),
+            TokenType::IntLiteral(value) => Expression::Constant(value),
             _ => {
-                Err(ParseError {
+                let error = ParseError {
                     expected: TokenType::IntLiteral(0), // Placeholder
                     found: token.clone(),
                     position: self.current,
-                    message: "Unexpected token".to_string(),
-                })
+                    message: "Expected an integer literal".to_string(),
+                };
+                return Err(error);
             }
         };
 
         self.advance();
 
-        expression
+        Ok(expression)
     }
 
     fn consume(&mut self, expected: TokenType, message: &str) -> Result<TokenType, ParseError> {
@@ -109,31 +122,32 @@ impl<'a> Parser<'a> {
             return Err(err);
         }
 
-        let consumed_token = Ok(self.current_token()?.token_type.clone());
+        let consumed_token = Ok(self.current_token().token_type.clone());
 
         self.advance();
 
         consumed_token
     }
 
-    fn check(&self, expected: &TokenType) -> Result<(), ParseError> {
+    fn check(&mut self, expected: &TokenType) -> Result<(), ParseError> {
         let is_expected = match expected {
             TokenType::Identifier(_) => {
-                matches!(self.current_token()?.token_type, TokenType::Identifier(_))
+                matches!(self.current_token().token_type, TokenType::Identifier(_))
             }
             TokenType::IntLiteral(_) => {
-                matches!(self.current_token()?.token_type, TokenType::IntLiteral(_))
+                matches!(self.current_token().token_type, TokenType::IntLiteral(_))
             }
-            _ => &self.current_token()?.token_type == expected,
+            _ => &self.current_token().token_type == expected,
         };
 
         if !is_expected {
-            return Err(ParseError {
+            let error = ParseError {
                 expected: expected.clone(),
-                found: self.current_token()?.clone(),
+                found: self.current_token().clone(),
                 position: self.current,
                 message: "Unexpected token".to_string(),
-            });
+            };
+            return Err(error);
         }
         Ok(())
     }
@@ -149,15 +163,34 @@ impl<'a> Parser<'a> {
         self.current += 1;
     }
 
-    fn current_token(&self) -> Result<&Token, ParseError> {
-        Ok(&self.tokens[self.current])
+    fn current_token(&self) -> &Token {
+        &self.tokens[self.current]
     }
 
     fn is_end(&self) -> bool {
         self.tokens[self.current].token_type == TokenType::EndOfFile
     }
+
+    fn synchronize(&mut self) {
+        while !self.is_end() {
+            if self.current_token().token_type == TokenType::Semicolon {
+                self.advance();
+                return;
+            }
+
+            match self.peek().token_type {
+                TokenType::IntKeyword
+                | TokenType::VoidKeyword
+                | TokenType::ReturnKeyword
+                | TokenType::Identifier(_) => {
+                    return;
+                }
+                _ => self.advance(),
+            }
+        }
+    }
 }
 
-pub fn parse(tokens: Vec<Token>) -> Result<ProgramAst, ParseError> {
+pub fn parse(tokens: Vec<Token>) -> Result<ProgramAst, Vec<ParseError>> {
     Parser::new(&tokens).parse()
 }
