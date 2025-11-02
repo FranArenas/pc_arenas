@@ -1,13 +1,21 @@
 use std::path::{Path, PathBuf};
-use std::process::{exit, Command};
+use std::process::Command;
 
-use pc_arenas::{generate_code, parse, tokenize, Cli, CodeEmitter};
+use pc_arenas::{Cli, CodeEmitter, ProgramAssembly};
+
+/// Tracks which files have been created during compilation for cleanup purposes
+#[derive(Default)]
+struct CreatedFiles {
+    preprocessed: bool,
+    compiled: bool,
+    executable: bool,
+}
 
 fn main() {
     // Get the input arguments
     let cli = Cli::parse_and_validate();
 
-    // Get the needed file paths
+    // Get the needed file paths and variables
     let input_stem = cli
         .input_file
         .file_stem()
@@ -20,44 +28,122 @@ fn main() {
     let compiled_filepath = cli.output_folder.join(input_stem).with_extension("s");
     let executable_filepath = cli.output_folder.join(input_stem);
 
-    eprint!("input file: {}\n", cli.input_file.display());
-    eprint!("preprocessed file: {}\n", preprocessed_filepath.display());
-    eprint!("compiled file: {}\n", compiled_filepath.display());
-    eprint!("executable file: {}\n", executable_filepath.display());
-    if input_stem.contains("tabs") {}
+    let mut created_files = CreatedFiles::default();
 
-    // Execute the C preprocessor
-    preprocess(&cli.input_file, &preprocessed_filepath);
-
-    // Compile the preprocessed file
-    compile(
+    // Execute the compilation pipeline
+    let result = compile(
+        &cli,
         &preprocessed_filepath,
         &compiled_filepath,
-        cli.lex,
-        cli.parse,
-        cli.print_program_ast,
-        cli.print_assembly_ast,
+        &executable_filepath,
+        &mut created_files,
     );
 
-    // Check if the user wants to stop after lexing, parsing, or code generation
-    if cli.lex || cli.parse || cli.codegen {
-        return;
-    }
+    // Perform cleanup regardless of success or failure
+    cleanup(
+        &cli,
+        &preprocessed_filepath,
+        &compiled_filepath,
+        &created_files,
+    );
 
-    // Assemble and link the assembly file
-    assemble(&compiled_filepath, &executable_filepath);
-
-    // Clean up temporary files
-    if !cli.save_preprocessed {
-        std::fs::remove_file(&preprocessed_filepath).expect("Failed to delete preprocessed file");
-    }
-
-    if !cli.save_compiled {
-        std::fs::remove_file(&compiled_filepath).expect("Failed to delete assembly file");
+    // Handle compilation result
+    if let Err(error) = result {
+        eprintln!("{}", error);
+        std::process::exit(1);
     }
 }
 
-fn preprocess<P: AsRef<Path>>(input_file: P, output_file: P) {
+fn compile(
+    cli: &Cli,
+    preprocessed_filepath: &PathBuf,
+    compiled_filepath: &PathBuf,
+    executable_filepath: &PathBuf,
+    created_files: &mut CreatedFiles,
+) -> Result<(), String> {
+    // Execute the C preprocessor
+    preprocess(&cli.input_file, preprocessed_filepath)
+        .map_err(|e| format!("Preprocessing error: {}", e))?;
+    created_files.preprocessed = true;
+
+    // Step 1: Lexing
+    let tokens = lex(preprocessed_filepath)?;
+
+    if cli.stop_after_lexing {
+        return Ok(());
+    }
+
+    // Step 2: Parsing
+    let ast = parse(tokens)?;
+
+    if cli.print_program_ast {
+        println!("{}", ast);
+    }
+
+    if cli.stop_after_parsing {
+        return Ok(());
+    }
+
+    // Step 3: Generate code
+    let assembly = generate_code(ast)?;
+
+    if cli.print_assembly_ast {
+        println!("{}", assembly);
+    }
+
+    if cli.stop_after_codegen {
+        return Ok(());
+    }
+
+    // Step 4: Emit code to file
+    emit_code(assembly, compiled_filepath)?;
+    created_files.compiled = true;
+
+    // Assemble and link if the user didn't request to stop earlier
+    if !cli.stop_after_lexing && !cli.stop_after_parsing && !cli.stop_after_codegen {
+        assemble(compiled_filepath, executable_filepath)
+            .map_err(|e| format!("Assembly error: {}", e))?;
+        created_files.executable = true;
+    }
+
+    Ok(())
+}
+
+/// Cleanup function that removes temporary files based on CLI flags and what was actually created
+fn cleanup(
+    cli: &Cli,
+    preprocessed_filepath: &PathBuf,
+    compiled_filepath: &PathBuf,
+    created_files: &CreatedFiles,
+) {
+    // Clean up preprocessed file if it was created and user doesn't want to save it
+    if created_files.preprocessed && !cli.save_preprocessed {
+        if preprocessed_filepath.exists() {
+            if let Err(e) = std::fs::remove_file(preprocessed_filepath) {
+                eprintln!(
+                    "Warning: Failed to delete preprocessed file '{}': {}",
+                    preprocessed_filepath.display(),
+                    e
+                );
+            }
+        }
+    }
+
+    // Clean up compiled file if it was created and user doesn't want to save it
+    if created_files.compiled && !cli.save_compiled {
+        if compiled_filepath.exists() {
+            if let Err(e) = std::fs::remove_file(compiled_filepath) {
+                eprintln!(
+                    "Warning: Failed to delete assembly file '{}': {}",
+                    compiled_filepath.display(),
+                    e
+                );
+            }
+        }
+    }
+}
+
+fn preprocess<P: AsRef<Path>>(input_file: P, output_file: P) -> Result<(), String> {
     let output = Command::new("gcc")
         .arg("-E")
         .arg("-P")
@@ -65,89 +151,88 @@ fn preprocess<P: AsRef<Path>>(input_file: P, output_file: P) {
         .arg("-o")
         .arg(output_file.as_ref())
         .output()
-        .expect("Failed to execute preprocessor");
+        .map_err(|e| format!("Failed to execute preprocessor: {}", e))?;
 
     if !output.status.success() {
-        eprintln!("Preprocessing failed!");
-        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
-        exit(1);
+        return Err(format!(
+            "Preprocessing failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
+
+    Ok(())
 }
 
-fn compile<P: AsRef<Path>>(
+fn lex<P: AsRef<Path>>(
     preprocessed_file: P,
-    output_filename: P,
-    finish_at_lexing: bool,
-    finish_at_parsing: bool,
-    print_program_ast: bool,
-    print_assembly_ast: bool,
-) {
-    // Lexing
-    let (tokens, lex_errors) = tokenize(&std::fs::read_to_string(preprocessed_file).unwrap());
+) -> Result<Vec<pc_arenas::frontend::lexer::Token>, String> {
+    let content = std::fs::read_to_string(preprocessed_file)
+        .map_err(|e| format!("Failed to read preprocessed file: {}", e))?;
+
+    let (tokens, lex_errors) = pc_arenas::frontend::lexer::tokenize(&content);
 
     if !lex_errors.is_empty() {
-        for error in lex_errors {
-            eprintln!("Lexical error: {}", error);
+        let mut error_messages = Vec::new();
+        for error in &lex_errors {
+            error_messages.push(error.to_string());
         }
-        exit(1);
+        return Err(error_messages.join("\n"));
     }
 
-    if finish_at_lexing {
-        return;
-    }
+    Ok(tokens)
+}
 
-    // Parsing
-    let ast = parse(tokens).unwrap_or_else(|parse_error| {
+fn parse(
+    tokens: Vec<pc_arenas::frontend::lexer::Token>,
+) -> Result<pc_arenas::frontend::program_ast::ProgramAst, String> {
+    let ast = pc_arenas::frontend::parser::parse(tokens).map_err(|parse_error| {
+        let mut error_messages = Vec::new();
         for error in &parse_error {
-            eprintln!("Parsing error: {}", error);
+            error_messages.push(error.to_string());
         }
-        std::process::exit(1);
-    });
+        error_messages.join("\n")
+    })?;
 
-    if print_program_ast {
-        println!("{}", ast);
-    }
+    Ok(ast)
+}
 
-    if finish_at_parsing {
-        return;
-    }
+fn generate_code(
+    ast: pc_arenas::frontend::program_ast::ProgramAst,
+) -> Result<ProgramAssembly, String> {
+    let assembly_ast = pc_arenas::backend::code_ast_gen::generate_code(&ast)
+        .map_err(|codegen_error| codegen_error.message)?; // todo: Implement panic mode to get multiple errors if possible
 
-    // Code generation
-    let assembly_ast = generate_code(&ast).unwrap_or_else(|codegen_error| {
-        eprintln!("Code generation error: {}", codegen_error.message);
-        std::process::exit(1);
-    });
-    if print_assembly_ast {
-        println!("{}", assembly_ast);
-    }
+    Ok(assembly_ast)
+}
 
-    let mut code_emitter =
-        CodeEmitter::from_path(output_filename).unwrap_or_else(|code_emission_error| {
-            eprintln!("Code emission error: {}", code_emission_error.message);
-            std::process::exit(1);
-        });
+fn emit_code<P: AsRef<Path>>(
+    assembly_ast: ProgramAssembly,
+    output_filename: P,
+) -> Result<(), String> {
+    let mut code_emitter = CodeEmitter::from_path(output_filename)
+        .map_err(|code_emission_error| format!("Code emission error: {}", code_emission_error))?;
 
     code_emitter
         .emit_code(&assembly_ast)
-        .unwrap_or_else(|code_emission_error| {
-            eprintln!("Code emission error: {}", code_emission_error.message);
-            std::process::exit(1);
-        });
+        .map_err(|code_emission_error| format!("Code emission error: {}", code_emission_error))?;
+
+    Ok(())
 }
 
-fn assemble(compiled_filepath: &PathBuf, output_filepath: &PathBuf) {
+fn assemble(compiled_filepath: &PathBuf, output_filepath: &PathBuf) -> Result<(), String> {
     let output = Command::new("gcc")
         .arg(compiled_filepath)
         .arg("-o")
         .arg(output_filepath)
         .output()
-        .expect("Failed to execute assembler");
+        .map_err(|e| format!("Failed to execute assembler: {}", e))?;
 
     if !output.status.success() {
-        eprintln!(
-            "Assembly failed! stderr: {}",
+        return Err(format!(
+            "Assembly failed: {}",
             String::from_utf8_lossy(&output.stderr)
-        );
-        exit(1);
+        ));
     }
+
+    Ok(())
 }

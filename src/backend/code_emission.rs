@@ -1,11 +1,16 @@
-use std::fs::File;
 use std::io::Write;
+use std::{fmt, fs::File};
 
 use crate::backend::assembly_ast::{FunctionDefinitionAssembly, ProgramAssembly};
 
 #[derive(Debug, Clone)]
 pub struct CodeEmissionError {
     pub message: String,
+}
+impl fmt::Display for CodeEmissionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "{}", self.message)
+    }
 }
 
 // Todo: Consider moving the generated code to a trait (name: GenerateAssembly) to all the nodes of the assembly AST

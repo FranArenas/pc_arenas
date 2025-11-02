@@ -18,7 +18,7 @@ struct CliArgs {
     save_preprocessed: bool,
 
     /// Save the compiled output
-    #[arg(short = 'c', long = "compile", default_value_t = true)]
+    #[arg(short = 'c', long = "compile", default_value_t = false)]
     save_compiled: bool,
 
     /// Stop after lexing
@@ -58,10 +58,10 @@ pub struct Cli {
     pub save_compiled: bool,
 
     /// Stop after lexing
-    pub lex: bool,
+    pub stop_after_lexing: bool,
 
     /// Stop after parsing
-    pub parse: bool,
+    pub stop_after_parsing: bool,
 
     /// Stop after printing the program AST
     pub print_program_ast: bool,
@@ -70,7 +70,7 @@ pub struct Cli {
     pub print_assembly_ast: bool,
 
     /// Stop after code generation
-    pub codegen: bool,
+    pub stop_after_codegen: bool,
 }
 
 impl Cli {
@@ -132,11 +132,11 @@ impl Cli {
             output_folder: output_folder,
             save_preprocessed: cli_args.save_preprocessed,
             save_compiled: cli_args.save_compiled,
-            lex: cli_args.lex,
-            parse: cli_args.parse,
+            stop_after_lexing: cli_args.lex,
+            stop_after_parsing: cli_args.parse,
             print_program_ast: cli_args.print_program_ast,
             print_assembly_ast: cli_args.print_assembly_ast,
-            codegen: cli_args.codegen,
+            stop_after_codegen: cli_args.codegen,
         }
     }
 }
