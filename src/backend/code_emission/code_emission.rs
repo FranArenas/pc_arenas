@@ -1,7 +1,7 @@
 use std::io::Write;
 use std::{fmt, fs::File};
 
-use crate::backend::assembly_ast::{FunctionDefinitionAssembly, ProgramAssembly};
+use crate::backend::assembly_definition::{FunctionDefinitionAssembly, ProgramAssembly};
 
 #[derive(Debug, Clone)]
 pub struct CodeEmissionError {
@@ -41,7 +41,7 @@ impl CodeEmitter {
     pub fn emit_code(&mut self, assembly: &ProgramAssembly) -> Result<(), CodeEmissionError> {
         match assembly {
             ProgramAssembly::ProgramAssembly(func_def) => {
-                self.handle_function_definition(func_def)?
+                self.process_function_definition(func_def)?
             }
         };
 
@@ -56,7 +56,7 @@ impl CodeEmitter {
         Ok(())
     }
 
-    fn handle_function_definition(
+    fn process_function_definition(
         &mut self,
         func_def: &FunctionDefinitionAssembly,
     ) -> Result<(), CodeEmissionError> {
@@ -68,6 +68,8 @@ impl CodeEmitter {
                 let code = format!(
                     r#".globl {name}
 {name}:
+        pushq   %rbp
+        movq    %rsp, %rbp
                     "#,
                     name = identifier,
                 );
@@ -75,6 +77,7 @@ impl CodeEmitter {
                     message: format!("Failed to write function definition to output file: {}", e),
                 })?;
                 for instr in instructions {
+                    // The generated code for each instruction is part of the fmt::Display impl
                     writeln!(self.file, "{}", instr).map_err(|e| CodeEmissionError {
                         message: format!("Failed to write instruction to output file: {}", e),
                     })?;

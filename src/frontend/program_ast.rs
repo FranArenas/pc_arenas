@@ -1,4 +1,23 @@
 use std::fmt;
+
+// Trait for AST nodes that can be formatted with indentation
+pub trait IndentedDisplay {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, indent: &str) -> fmt::Result;
+}
+
+// Macro to automatically generate Display implementation for types that implement IndentedDisplay
+macro_rules! impl_display {
+    ($($type:ty),*) => {
+        $(
+            impl fmt::Display for $type {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    self.fmt_with_indent(f, "")
+                }
+            }
+        )*
+    };
+}
+
 // Program
 #[derive(Debug, Clone)]
 pub enum ProgramAst {
@@ -22,7 +41,7 @@ pub enum FunctionDefinition {
     Function { identifier: String, body: Statement },
 }
 
-impl FunctionDefinition {
+impl IndentedDisplay for FunctionDefinition {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, indent: &str) -> fmt::Result {
         match self {
             FunctionDefinition::Function { identifier, body } => {
@@ -33,19 +52,13 @@ impl FunctionDefinition {
     }
 }
 
-impl fmt::Display for FunctionDefinition {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_indent(f, "")
-    }
-}
-
 // Statement
 #[derive(Debug, Clone)]
 pub enum Statement {
     Return(Expression),
 }
 
-impl Statement {
+impl IndentedDisplay for Statement {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, indent: &str) -> fmt::Result {
         match self {
             Statement::Return(expr) => {
@@ -56,30 +69,42 @@ impl Statement {
     }
 }
 
-impl fmt::Display for Statement {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_indent(f, "")
-    }
-}
-
 // Expression
 #[derive(Debug, Clone)]
 pub enum Expression {
     Constant(i64),
+    UnaryOp(UnaryOperator, Box<Expression>),
 }
 
-impl Expression {
+impl IndentedDisplay for Expression {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, indent: &str) -> fmt::Result {
         match self {
             Expression::Constant(value) => {
                 writeln!(f, "{}└── Constant: {}", indent, value)
             }
+            Expression::UnaryOp(operator, expression) => {
+                writeln!(f, "{}└── UnaryOp: {}", indent, operator)?;
+                expression.fmt_with_indent(f, &format!("{}    ", indent))
+            }
         }
     }
 }
 
-impl fmt::Display for Expression {
+// UnaryOperator
+#[derive(Debug, Clone)]
+pub enum UnaryOperator {
+    BitwiseComplement,
+    Negation,
+}
+
+impl fmt::Display for UnaryOperator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_indent(f, "")
+        match self {
+            UnaryOperator::BitwiseComplement => write!(f, "BitwiseComplement (~)"),
+            UnaryOperator::Negation => write!(f, "Negation (-)"),
+        }
     }
 }
+
+// Generate Display implementations for all types that implement IndentedDisplay
+impl_display!(FunctionDefinition, Statement, Expression);

@@ -12,6 +12,11 @@ pub enum TokenType {
     VoidKeyword,
     ReturnKeyword,
 
+    // Unary operators
+    BitwiseComplement, // ~
+    Negation,          // -
+    Decrement,         // --
+
     // Others
     OpenParen,
     CloseParen,
@@ -176,6 +181,26 @@ pub fn tokenize(input: &str) -> (Vec<Token>, Vec<LexError>) {
                         lexer.row,
                         start_column,
                     ));
+                }
+            }
+            '~' => tokens.push(Token::new(
+                TokenType::BitwiseComplement,
+                lexer.row,
+                lexer.column,
+            )),
+            '-' => {
+                match lexer.peek() {
+                    Some('-') => {
+                        lexer.next(); // Consume the second '-'
+                        tokens.push(Token::new(
+                            TokenType::Decrement,
+                            lexer.row,
+                            lexer.column - 1, // -1 because we consumed an extra character with next()
+                        ));
+                    }
+                    _ => {
+                        tokens.push(Token::new(TokenType::Negation, lexer.row, lexer.column));
+                    }
                 }
             }
             '(' => tokens.push(Token::new(TokenType::OpenParen, lexer.row, lexer.column)),

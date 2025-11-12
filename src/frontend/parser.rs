@@ -1,11 +1,13 @@
 use std::fmt;
 
 use crate::frontend::lexer::{Token, TokenType};
-use crate::frontend::program_ast::{Expression, FunctionDefinition, ProgramAst, Statement};
+use crate::frontend::program_ast::{
+    Expression, FunctionDefinition, ProgramAst, Statement, UnaryOperator,
+};
 
 #[derive(Debug, Clone)]
 pub struct ParseError {
-    pub expected: TokenType,
+    pub expected: Vec<TokenType>,
     pub found: Token,
     pub position: usize,
     pub message: String,
@@ -23,7 +25,7 @@ impl fmt::Display for ParseError {
 
 struct Parser<'a> {
     tokens: &'a [Token],
-    current: usize,
+    current_index: usize,
     errors: Vec<ParseError>,
 }
 
@@ -31,7 +33,7 @@ impl<'a> Parser<'a> {
     pub fn new(tokens: &'a [Token]) -> Self {
         Self {
             tokens,
-            current: 0,
+            current_index: 0,
             errors: Vec::new(),
         }
     }
@@ -96,24 +98,58 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expression(&mut self) -> Result<Expression, ParseError> {
-        let token = self.current_token();
+        let peeked_token = self.current_token();
 
-        let expression = match token.token_type {
-            TokenType::IntLiteral(value) => Expression::Constant(value),
+        let expression = match peeked_token.token_type {
+            TokenType::IntLiteral(value) => {
+                self.advance();
+                Expression::Constant(value)
+            }
+            // Unary operators
+            TokenType::Negation | TokenType::BitwiseComplement => {
+                let operator = self.parse_unary_operator()?;
+                let inner_expr = self.parse_expression()?;
+                Expression::UnaryOp(operator, Box::new(inner_expr))
+            }
+            // Parentheses
+            TokenType::OpenParen => {
+                let line = peeked_token.line;
+                let column = peeked_token.column;
+                self.advance();
+                let inner_expr = self.parse_expression()?;
+                self.consume(TokenType::CloseParen, &format!("Expected closing parenthesis to match opened parenthesis at position {}:{}", line, column))?;
+                inner_expr
+            }
             _ => {
                 let error = ParseError {
-                    expected: TokenType::IntLiteral(0), // Placeholder
-                    found: token.clone(),
-                    position: self.current,
+                    expected: vec![TokenType::IntLiteral(0)], // 0 is a placeholder
+                    found: peeked_token.clone(),
+                    position: self.current_index,
                     message: "Expected an integer literal".to_string(),
                 };
                 return Err(error);
             }
         };
 
-        self.advance();
-
         Ok(expression)
+    }
+
+    fn parse_unary_operator(&mut self) -> Result<UnaryOperator, ParseError> {
+        let operator = match self.current_token().token_type {
+            TokenType::Negation => UnaryOperator::Negation,
+            TokenType::BitwiseComplement => UnaryOperator::BitwiseComplement,
+            _ => {
+                let error = ParseError {
+                    expected: vec![TokenType::Negation, TokenType::BitwiseComplement], // Placeholder
+                    found: self.current_token().clone(),
+                    position: self.current_index,
+                    message: "Expected a unary operator".to_string(),
+                };
+                return Err(error);
+            }
+        };
+        self.advance();
+        Ok(operator)
     }
 
     fn consume(&mut self, expected: TokenType, message: &str) -> Result<TokenType, ParseError> {
@@ -142,9 +178,9 @@ impl<'a> Parser<'a> {
 
         if !is_expected {
             let error = ParseError {
-                expected: expected.clone(),
+                expected: vec![expected.clone()],
                 found: self.current_token().clone(),
-                position: self.current,
+                position: self.current_index,
                 message: "Unexpected token".to_string(),
             };
             return Err(error);
@@ -153,22 +189,22 @@ impl<'a> Parser<'a> {
     }
 
     fn peek(&self) -> &Token {
-        if self.current + 1 < self.tokens.len() {
-            return &self.tokens[self.current + 1];
+        if self.current_index + 1 < self.tokens.len() {
+            return &self.tokens[self.current_index + 1];
         }
         panic!("Tried to peek beyond the end of the token list")
     }
 
     fn advance(&mut self) {
-        self.current += 1;
+        self.current_index += 1;
     }
 
     fn current_token(&self) -> &Token {
-        &self.tokens[self.current]
+        &self.tokens[self.current_index]
     }
 
     fn is_end(&self) -> bool {
-        self.tokens[self.current].token_type == TokenType::EndOfFile
+        self.tokens[self.current_index].token_type == TokenType::EndOfFile
     }
 
     fn synchronize(&mut self) {

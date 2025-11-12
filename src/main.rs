@@ -77,6 +77,7 @@ fn compile(
     let ast = parse(tokens)?;
 
     if cli.print_program_ast {
+        println!("Program AST:\n");
         println!("{}", ast);
     }
 
@@ -84,10 +85,23 @@ fn compile(
         return Ok(());
     }
 
-    // Step 3: Generate code
-    let assembly = generate_code(ast)?;
+    // Step 3: IR Generation
+    let ir = generate_ir(ast);
+
+    if cli.print_ir {
+        println!("IR Representation:\n");
+        println!("{}", ir);
+    }
+
+    if cli.stop_after_ir {
+        return Ok(());
+    }
+
+    // Step 4: assembly code generation
+    let assembly = generate_assembly(ir)?;
 
     if cli.print_assembly_ast {
+        println!("Assembly Representation:\n");
         println!("{}", assembly);
     }
 
@@ -95,11 +109,11 @@ fn compile(
         return Ok(());
     }
 
-    // Step 4: Emit code to file
+    // Step 5: Emit code to file
     emit_code(assembly, compiled_filepath)?;
     created_files.compiled = true;
 
-    // Assemble and link if the user didn't request to stop earlier
+    // Step 6: Assemble and link if the user didn't request to stop earlier
     if !cli.stop_after_lexing && !cli.stop_after_parsing && !cli.stop_after_codegen {
         assemble(compiled_filepath, executable_filepath)
             .map_err(|e| format!("Assembly error: {}", e))?;
@@ -196,11 +210,19 @@ fn parse(
     Ok(ast)
 }
 
-fn generate_code(
+fn generate_ir(
     ast: pc_arenas::frontend::program_ast::ProgramAst,
+) -> pc_arenas::backend::intermediate_representation::ir_definition::ProgramIR {
+    pc_arenas::backend::intermediate_representation::ir_generation::generate_ir(&ast)
+}
+
+fn generate_assembly(
+    ir: pc_arenas::backend::intermediate_representation::ir_definition::ProgramIR,
 ) -> Result<ProgramAssembly, String> {
-    let assembly_ast = pc_arenas::backend::code_ast_gen::generate_code(&ast)
-        .map_err(|codegen_error| codegen_error.message)?; // todo: Implement panic mode to get multiple errors if possible
+    let assembly_ast =
+        pc_arenas::backend::assembly_generation::generate_code(&ir).map_err(|codegen_error| {
+            format!("Error generating assembly code: {}", codegen_error.message)
+        })?; // todo: Implement panic mode to get multiple errors if possible
 
     Ok(assembly_ast)
 }

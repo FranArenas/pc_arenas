@@ -22,12 +22,12 @@ struct CliArgs {
     save_compiled: bool,
 
     /// Stop after lexing
-    #[arg(long = "lex")]
-    lex: bool,
+    #[arg(long = "lex", default_value_t = false)]
+    stop_after_lexing: bool,
 
     /// Stop after parsing
-    #[arg(long = "parse")]
-    parse: bool,
+    #[arg(long = "parse", default_value_t = false)]
+    stop_after_parsing: bool,
 
     /// Stop after printing the program AST
     #[arg(long = "print-program-ast", default_value_t = true)]
@@ -38,8 +38,16 @@ struct CliArgs {
     print_assembly_ast: bool,
 
     /// Stop after code generation
-    #[arg(long = "codegen")]
-    codegen: bool,
+    #[arg(long = "codegen", default_value_t = false)]
+    stop_after_codegen: bool,
+
+    /// Print the intermediate representation (IR)
+    #[arg(long = "print-ir", default_value_t = true)]
+    print_ir: bool,
+
+    /// Stop after generating the intermediate representation (IR)
+    #[arg(long = "tacky", default_value_t = false)]
+    stop_after_ir: bool,
 }
 
 /// Parsed and validated CLI structure
@@ -47,30 +55,26 @@ struct CliArgs {
 pub struct Cli {
     /// Path to the C source file
     pub input_file: PathBuf,
-
     /// Resolved output folder path (computed field)
     pub output_folder: PathBuf,
-
     /// Save the preprocessed output
     pub save_preprocessed: bool,
-
     /// Save the compiled output
     pub save_compiled: bool,
-
     /// Stop after lexing
     pub stop_after_lexing: bool,
-
     /// Stop after parsing
     pub stop_after_parsing: bool,
-
     /// Stop after printing the program AST
     pub print_program_ast: bool,
-
     /// Stop after printing the assembly AST
     pub print_assembly_ast: bool,
-
     /// Stop after code generation
     pub stop_after_codegen: bool,
+    /// Print the intermediate representation (IR)
+    pub print_ir: bool,
+    /// Stop after generating the intermediate representation (IR)
+    pub stop_after_ir: bool,
 }
 
 impl Cli {
@@ -132,11 +136,13 @@ impl Cli {
             output_folder: output_folder,
             save_preprocessed: cli_args.save_preprocessed,
             save_compiled: cli_args.save_compiled,
-            stop_after_lexing: cli_args.lex,
-            stop_after_parsing: cli_args.parse,
+            stop_after_lexing: cli_args.stop_after_lexing,
+            stop_after_parsing: cli_args.stop_after_parsing,
             print_program_ast: cli_args.print_program_ast,
             print_assembly_ast: cli_args.print_assembly_ast,
-            stop_after_codegen: cli_args.codegen,
+            stop_after_codegen: cli_args.stop_after_codegen,
+            print_ir: cli_args.print_ir,
+            stop_after_ir: cli_args.stop_after_ir,
         }
     }
 }

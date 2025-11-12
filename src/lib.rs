@@ -7,6 +7,6 @@ pub use frontend::parser::{parse, ParseError};
 pub use frontend::program_ast::{Expression, FunctionDefinition, ProgramAst, Statement};
 
 pub mod backend;
-pub use backend::assembly_ast::ProgramAssembly;
-pub use backend::code_ast_gen::{generate_code, CodeGenError};
+pub use backend::assembly_definition::ProgramAssembly;
+pub use backend::assembly_generation::{generate_code, CodeGenError};
 pub use backend::code_emission::{CodeEmissionError, CodeEmitter};
