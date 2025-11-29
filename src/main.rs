@@ -214,10 +214,7 @@ fn generate_ir(
 fn generate_assembly(
     ir: pc_arenas::backend::intermediate_representation::ir_definition::ProgramIR,
 ) -> Result<ProgramAssembly, String> {
-    let assembly_ast =
-        pc_arenas::backend::assembly_generation::generate_code(ir).map_err(|codegen_error| {
-            format!("Error generating assembly code: {}", codegen_error.message)
-        })?; // todo: Implement panic mode to get multiple errors if possible
+    let assembly_ast = pc_arenas::backend::assembly_generation::generate_code(ir);
 
     Ok(assembly_ast)
 }

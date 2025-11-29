@@ -10,12 +10,7 @@ use crate::backend::{
     },
 };
 
-#[derive(Debug, Clone)]
-pub struct CodeGenError {
-    pub message: String,
-}
-
-pub fn generate_code(ast: ProgramIR) -> Result<ProgramAssembly, CodeGenError> {
+pub fn generate_code(ast: ProgramIR) -> ProgramAssembly {
     let ast_with_temporal_addresses = match ast {
         ProgramIR::ProgramIR(func_def) => {
             ProgramAssembly::ProgramAssembly(process_function_definition(func_def))
@@ -24,12 +19,14 @@ pub fn generate_code(ast: ProgramIR) -> Result<ProgramAssembly, CodeGenError> {
 
     // Right now there is only one function per program, so we can process it directly. Replace it with a loop later if needed.
     let ProgramAssembly::ProgramAssembly(func_def) = ast_with_temporal_addresses;
-    let function_definition_with_stack_addresses = fix_assembly_ast(func_def)?;
+    let function_definition_with_stack_addresses = fix_assembly_ast(func_def);
 
-    Ok(ProgramAssembly::ProgramAssembly(
-        function_definition_with_stack_addresses,
-    ))
+    ProgramAssembly::ProgramAssembly(function_definition_with_stack_addresses)
 }
+
+// ===============================================
+// Process IR to Assembly AST
+// ===============================================
 
 fn process_function_definition(func: FunctionDefinitionIR) -> FunctionDefinitionAssembly {
     match func {
@@ -198,42 +195,25 @@ fn process_value(value: ValueIR) -> OperandAssembly {
     }
 }
 
-// Memory Allocation and assembly fixes section. todo: move to separate module
-// Process first AST to replace pseudoregisters with stack addresses and then allocate stack space. Register allocation
+// ==============================================
+// Fixes for generated Assembly AST.
+// Memory Allocation and invalid instruction fixes
+// ==============================================
 
-/// Replaces pseudoregisters in a function definition with stack addresses,
-/// allocates stack space, and fixes invalid move instructions.
-///
-/// This function performs three main transformations:
-/// 1. Replaces all pseudoregisters with stack variable offsets
-/// 2. Inserts a stack allocation instruction at the beginning of the function
-/// 3. Fixes invalid move instructions where both operands are stack variables
-///
-/// # Arguments
-///
-/// * `function_def` - The function definition containing pseudoregisters to replace.
+/// Traverser the assembly AST and performs necessary fixes to ensure valid x86 assembly code.
 ///
 /// # Returns
-///
-/// Returns the updated `FunctionDefinitionAssembly` with all pseudoregisters replaced,
-/// stack space allocated, and all move instructions valid.
-///
-/// # Errors
-///
-/// Returns a `CodeGenError` if any transformation step fails.
-fn fix_assembly_ast(
-    function_def: FunctionDefinitionAssembly,
-) -> Result<FunctionDefinitionAssembly, CodeGenError> {
-    let (ast_with_stack_addresses, stack_offset) = fix_function(function_def);
-    // Add the stack allocation instruction at the beginning of the function to allocate space for all stack variables.
+/// Returns the fixed `FunctionDefinitionAssembly`
+fn fix_assembly_ast(function_def: FunctionDefinitionAssembly) -> FunctionDefinitionAssembly {
+    let (ast_with_stack_addresses, stack_offset) = replace_pseudoregisters(function_def);
     let allocated_function = allocate_function_stack_space(ast_with_stack_addresses, stack_offset);
-    // Fix broken Mov instructions
-    Ok(fix_invalid_instructions_with_invalid_operands(
-        allocated_function,
-    )) //todo: This can be combined inside fix_function to just iterate once over the instructions
+    fix_invalid_instructions(allocated_function)
 }
 
-fn fix_function(function_def: FunctionDefinitionAssembly) -> (FunctionDefinitionAssembly, i32) {
+// Replace pseudoregisters with stack variable addresses
+fn replace_pseudoregisters(
+    function_def: FunctionDefinitionAssembly,
+) -> (FunctionDefinitionAssembly, i32) {
     match function_def {
         FunctionDefinitionAssembly::Function {
             identifier,
@@ -245,7 +225,6 @@ fn fix_function(function_def: FunctionDefinitionAssembly) -> (FunctionDefinition
 
             for instr in instructions {
                 match instr {
-                    // todo: This section is replacing pseudoregisters with stack addresses. Encapsulate it in a function and move this to a separate module
                     InstructionAssembly::Mov { src, dst } => {
                         let updated_src = replace_operand_pseudoregister(
                             src,
@@ -321,7 +300,7 @@ fn fix_function(function_def: FunctionDefinitionAssembly) -> (FunctionDefinition
     }
 }
 
-// If the operand is a pseudoregisterv replaces it with a stack variable address or returns. If the pseudoregister has not been seen before, it assigns a new stack offset.
+// If the operand is a pseudoregister replaces it with a stack variable address or returns. If the pseudoregister has not been seen before, it assigns a new stack offset.
 fn replace_operand_pseudoregister(
     operand: OperandAssembly,
     stack_offset: &mut i32,
@@ -356,10 +335,8 @@ fn allocate_function_stack_space(
     }
 }
 
-// After replacing the pseudoregisters  with stack addresses, it is possible to have a instructions with invalid operand like two stack variables for an instruction that doesn't accept them. This function fixes them
-fn fix_invalid_instructions_with_invalid_operands(
-    function: FunctionDefinitionAssembly,
-) -> FunctionDefinitionAssembly {
+// Fixes instructions that are invalid in x86 assembly
+fn fix_invalid_instructions(function: FunctionDefinitionAssembly) -> FunctionDefinitionAssembly {
     let FunctionDefinitionAssembly::Function {
         identifier,
         mut instructions,
@@ -368,7 +345,7 @@ fn fix_invalid_instructions_with_invalid_operands(
 
     for instruction in instructions.drain(..) {
         match instruction {
-            // Operations with two stack variables as operands that are invalid are fixed using an auxiliary register
+            // Mov instructions with two stack variables as operands that are invalid in x86 assembly. Use an auxiliary register to perform the move
             InstructionAssembly::Mov {
                 src: src_operand @ OperandAssembly::StackVariable(_),
                 dst: dst_operand @ OperandAssembly::StackVariable(_),
@@ -386,6 +363,7 @@ fn fix_invalid_instructions_with_invalid_operands(
                     },
                 ]);
             }
+            // Add/Sub instructions with two stack variables as operands that are invalid in x86 assembly. Move left operand to auxiliary register first
             InstructionAssembly::Binary {
                 binary_operator:
                     binary_operator @ (BinaryOperatorAssembly::AdditionAssembly
@@ -407,7 +385,7 @@ fn fix_invalid_instructions_with_invalid_operands(
                     },
                 ]);
             }
-            // Imul instruction can't use a memory address as the destination. Move to an auxiliary register first and then back
+            // Mul instruction can't use a memory address as the destination. Move to an auxiliary register first and then back
             InstructionAssembly::Binary {
                 binary_operator: BinaryOperatorAssembly::MultiplicationAssembly,
                 left_operand,
@@ -431,7 +409,7 @@ fn fix_invalid_instructions_with_invalid_operands(
                     },
                 ]);
             }
-            // Fix invalid idiv with constant divisor
+            // Idiv instruction can't use an immediate as divisor. Move to an auxiliary register first
             InstructionAssembly::Idiv {
                 divisor: divisor @ OperandAssembly::Immediate(_),
             } => {
