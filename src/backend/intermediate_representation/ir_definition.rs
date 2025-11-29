@@ -44,6 +44,12 @@ pub enum InstructionIR {
         src: ValueIR,
         dst: ValueIR,
     },
+    BinaryIR {
+        binary_operator: BinaryOperatorIR,
+        left_operand: ValueIR,
+        right_operand: ValueIR,
+        dst: ValueIR,
+    },
     ReturnIR {
         value: ValueIR,
     },
@@ -57,6 +63,18 @@ impl fmt::Display for InstructionIR {
                 dst,
             } => {
                 write!(f, "{} {} -> {}", unary_operator, src, dst)
+            }
+            InstructionIR::BinaryIR {
+                binary_operator,
+                left_operand: left_src,
+                right_operand: right_src,
+                dst,
+            } => {
+                write!(
+                    f,
+                    "{} {} , {} -> {}",
+                    binary_operator, left_src, right_src, dst
+                )
             }
             InstructionIR::ReturnIR { value } => {
                 write!(f, "RETURN {}", value)
@@ -89,6 +107,26 @@ impl fmt::Display for UnaryOperatorIR {
         match self {
             UnaryOperatorIR::BitwiseComplementIR => write!(f, "COMPLEMENT"),
             UnaryOperatorIR::NegationIR => write!(f, "NEGATE"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum BinaryOperatorIR {
+    AdditionIR,
+    SubtractionIR,
+    MultiplicationIR,
+    DivisionIR,
+    ModulusIR,
+}
+impl fmt::Display for BinaryOperatorIR {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BinaryOperatorIR::AdditionIR => write!(f, "ADD"),
+            BinaryOperatorIR::SubtractionIR => write!(f, "SUBTRACT"),
+            BinaryOperatorIR::MultiplicationIR => write!(f, "MULTIPLY"),
+            BinaryOperatorIR::DivisionIR => write!(f, "DIVIDE"),
+            BinaryOperatorIR::ModulusIR => write!(f, "MODULUS"),
         }
     }
 }

@@ -213,14 +213,14 @@ fn parse(
 fn generate_ir(
     ast: pc_arenas::frontend::program_ast::ProgramAst,
 ) -> pc_arenas::backend::intermediate_representation::ir_definition::ProgramIR {
-    pc_arenas::backend::intermediate_representation::ir_generation::generate_ir(&ast)
+    pc_arenas::backend::intermediate_representation::ir_generation::generate_ir(ast)
 }
 
 fn generate_assembly(
     ir: pc_arenas::backend::intermediate_representation::ir_definition::ProgramIR,
 ) -> Result<ProgramAssembly, String> {
     let assembly_ast =
-        pc_arenas::backend::assembly_generation::generate_code(&ir).map_err(|codegen_error| {
+        pc_arenas::backend::assembly_generation::generate_code(ir).map_err(|codegen_error| {
             format!("Error generating assembly code: {}", codegen_error.message)
         })?; // todo: Implement panic mode to get multiple errors if possible
 

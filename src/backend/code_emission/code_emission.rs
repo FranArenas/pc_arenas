@@ -66,11 +66,12 @@ impl CodeEmitter {
                 instructions,
             } => {
                 let code = format!(
-                    r#".globl {name}
+"
+.globl {name}
 {name}:
-        pushq   %rbp
-        movq    %rsp, %rbp
-                    "#,
+pushq   %rbp
+movq    %rsp, %rbp
+",
                     name = identifier,
                 );
                 writeln!(self.file, "{}", code).map_err(|e| CodeEmissionError {

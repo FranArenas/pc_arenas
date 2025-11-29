@@ -14,8 +14,14 @@ pub enum TokenType {
 
     // Unary operators
     BitwiseComplement, // ~
-    Negation,          // -
     Decrement,         // --
+    Negation,          // - Note: It can be unary or binary
+
+    // Binary operators
+    Add,      // +
+    Multiply, // *
+    Divide,   // /
+    Modulus,  // %
 
     // Others
     OpenParen,
@@ -26,6 +32,27 @@ pub enum TokenType {
 
     // End of file
     EndOfFile,
+}
+
+impl TokenType {
+    pub fn is_binary_operator(&self) -> bool {
+        matches!(
+            self,
+            TokenType::Add
+                | TokenType::Multiply
+                | TokenType::Divide
+                | TokenType::Modulus
+                | TokenType::Negation // Note: Negation can also be unary
+        )
+    }
+
+    pub fn get_precedence(&self) -> Option<u8> {
+        match self {
+            TokenType::Add | TokenType::Negation => Some(45),
+            TokenType::Multiply | TokenType::Divide | TokenType::Modulus => Some(50),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -90,7 +117,7 @@ impl<'a> Lexer<'a> {
     pub fn new(input: &'a str) -> Self {
         Lexer {
             column: 0,
-            row: 0,
+            row: 1, // Most editors start line numbering at 1, unfortunately
             input: input.chars().peekable(),
         }
     }
@@ -183,6 +210,7 @@ pub fn tokenize(input: &str) -> (Vec<Token>, Vec<LexError>) {
                     ));
                 }
             }
+            // Unary operators
             '~' => tokens.push(Token::new(
                 TokenType::BitwiseComplement,
                 lexer.row,
@@ -203,6 +231,12 @@ pub fn tokenize(input: &str) -> (Vec<Token>, Vec<LexError>) {
                     }
                 }
             }
+            // Binary operators
+            '+' => tokens.push(Token::new(TokenType::Add, lexer.row, lexer.column)),
+            '*' => tokens.push(Token::new(TokenType::Multiply, lexer.row, lexer.column)),
+            '/' => tokens.push(Token::new(TokenType::Divide, lexer.row, lexer.column)),
+            '%' => tokens.push(Token::new(TokenType::Modulus, lexer.row, lexer.column)),
+            // Others
             '(' => tokens.push(Token::new(TokenType::OpenParen, lexer.row, lexer.column)),
             ')' => tokens.push(Token::new(TokenType::CloseParen, lexer.row, lexer.column)),
             '{' => tokens.push(Token::new(TokenType::OpenBrace, lexer.row, lexer.column)),

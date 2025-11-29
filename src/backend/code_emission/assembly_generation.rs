@@ -2,11 +2,11 @@ use std::collections::HashMap;
 
 use crate::backend::{
     assembly_definition::{
-        FunctionDefinitionAssembly, InstructionAssembly, OperandAssembly, ProgramAssembly,
-        RegisterAssembly, UnaryOperatorAssembly,
+        BinaryOperatorAssembly, FunctionDefinitionAssembly, InstructionAssembly, OperandAssembly,
+        ProgramAssembly, RegisterAssembly, UnaryOperatorAssembly,
     },
     intermediate_representation::ir_definition::{
-        FunctionDefinitionIR, InstructionIR, ProgramIR, UnaryOperatorIR, ValueIR,
+        BinaryOperatorIR, FunctionDefinitionIR, InstructionIR, ProgramIR, UnaryOperatorIR, ValueIR,
     },
 };
 
@@ -15,7 +15,7 @@ pub struct CodeGenError {
     pub message: String,
 }
 
-pub fn generate_code(ast: &ProgramIR) -> Result<ProgramAssembly, CodeGenError> {
+pub fn generate_code(ast: ProgramIR) -> Result<ProgramAssembly, CodeGenError> {
     let ast_with_temporal_addresses = match ast {
         ProgramIR::ProgramIR(func_def) => {
             ProgramAssembly::ProgramAssembly(process_function_definition(func_def))
@@ -24,14 +24,14 @@ pub fn generate_code(ast: &ProgramIR) -> Result<ProgramAssembly, CodeGenError> {
 
     // Right now there is only one function per program, so we can process it directly. Replace it with a loop later if needed.
     let ProgramAssembly::ProgramAssembly(func_def) = ast_with_temporal_addresses;
-    let function_definition_with_stack_addresses = replace_pseudoregisters(func_def)?;
+    let function_definition_with_stack_addresses = fix_assembly_ast(func_def)?;
 
     Ok(ProgramAssembly::ProgramAssembly(
         function_definition_with_stack_addresses,
     ))
 }
 
-fn process_function_definition(func: &FunctionDefinitionIR) -> FunctionDefinitionAssembly {
+fn process_function_definition(func: FunctionDefinitionIR) -> FunctionDefinitionAssembly {
     match func {
         FunctionDefinitionIR::Function { identifier, body } => {
             let instructions = process_instructions(body);
@@ -43,7 +43,7 @@ fn process_function_definition(func: &FunctionDefinitionIR) -> FunctionDefinitio
     }
 }
 
-fn process_instructions(instructions_ir: &Vec<InstructionIR>) -> Vec<InstructionAssembly> {
+fn process_instructions(instructions_ir: Vec<InstructionIR>) -> Vec<InstructionAssembly> {
     let mut assembly_ins: Vec<InstructionAssembly> = Vec::new();
     for instr_ir in instructions_ir {
         match instr_ir {
@@ -55,15 +55,26 @@ fn process_instructions(instructions_ir: &Vec<InstructionIR>) -> Vec<Instruction
             InstructionIR::ReturnIR { value } => {
                 assembly_ins.extend(process_return_instruction(value))
             }
+            InstructionIR::BinaryIR {
+                binary_operator,
+                left_operand,
+                right_operand,
+                dst,
+            } => assembly_ins.extend(process_binary_instruction(
+                binary_operator,
+                left_operand,
+                right_operand,
+                dst,
+            )),
         }
     }
     assembly_ins
 }
 
 fn process_unary_instruction(
-    unary_operator: &UnaryOperatorIR,
-    src: &ValueIR,
-    dst: &ValueIR,
+    unary_operator: UnaryOperatorIR,
+    src: ValueIR,
+    dst: ValueIR,
 ) -> Vec<InstructionAssembly> {
     let mut instructions = Vec::new();
     let operator = match unary_operator {
@@ -84,7 +95,92 @@ fn process_unary_instruction(
     instructions
 }
 
-fn process_return_instruction(value: &ValueIR) -> Vec<InstructionAssembly> {
+fn process_binary_instruction(
+    binary_operator: BinaryOperatorIR,
+    left_operand: ValueIR,
+    right_operand: ValueIR,
+    dst: ValueIR,
+) -> Vec<InstructionAssembly> {
+    let mut instructions = Vec::new();
+    let operator = match binary_operator {
+        BinaryOperatorIR::AdditionIR => BinaryOperatorAssembly::AdditionAssembly,
+        BinaryOperatorIR::SubtractionIR => BinaryOperatorAssembly::SubtractionAssembly,
+        BinaryOperatorIR::MultiplicationIR => BinaryOperatorAssembly::MultiplicationAssembly,
+        BinaryOperatorIR::DivisionIR => {
+            return process_division_instruction(left_operand, right_operand, dst);
+        }
+        BinaryOperatorIR::ModulusIR => {
+            return process_modulo_instruction(left_operand, right_operand, dst);
+        }
+    };
+    let left_operand = process_value(left_operand);
+    let right_operand = process_value(right_operand);
+    let dst_operand = process_value(dst);
+
+    // Important: In x86 binary are calculated as dst = dst (right operand) op src (left operand). So we need to flip the operands and move the left operand to dst first
+    // Example: sub dst, src  => dst = dst - src. So Tacky Add left, right, dst becomes mov left, dst ; sub right, dst
+    instructions.push(InstructionAssembly::Mov {
+        // In x86 assembly the result is stored in the right operand
+        src: left_operand,
+        dst: dst_operand.clone(),
+    });
+    instructions.push(InstructionAssembly::Binary {
+        binary_operator: operator,
+        left_operand: right_operand,
+        right_operand: dst_operand.clone(),
+    });
+    instructions
+}
+
+// Division and modulus share common steps, only the final move differs as two different registers are used for the remainder and the quotient (AX for quotient, DX for remainder)
+fn process_div_mod_common(
+    dividend: ValueIR,
+    divisor: ValueIR,
+    dst: ValueIR,
+    result_reg: RegisterAssembly, // AX for quotient (div), DX for remainder (mod)
+) -> Vec<InstructionAssembly> {
+    let mut instructions = Vec::new();
+
+    // Move dividend into AX
+    instructions.push(InstructionAssembly::Mov {
+        src: process_value(dividend),
+        dst: OperandAssembly::Register(RegisterAssembly::Ax),
+    });
+
+    // Sign-extend EAX into EDX:EAX
+    instructions.push(InstructionAssembly::Cdq);
+
+    // Perform integer division
+    instructions.push(InstructionAssembly::Idiv {
+        divisor: process_value(divisor),
+    });
+
+    // Move either AX (quotient) or DX (remainder) to destination
+    instructions.push(InstructionAssembly::Mov {
+        src: OperandAssembly::Register(result_reg),
+        dst: process_value(dst),
+    });
+
+    instructions
+}
+
+fn process_division_instruction(
+    dividend: ValueIR,
+    divisor: ValueIR,
+    dst: ValueIR,
+) -> Vec<InstructionAssembly> {
+    process_div_mod_common(dividend, divisor, dst, RegisterAssembly::Ax)
+}
+
+fn process_modulo_instruction(
+    dividend: ValueIR,
+    divisor: ValueIR,
+    dst: ValueIR,
+) -> Vec<InstructionAssembly> {
+    process_div_mod_common(dividend, divisor, dst, RegisterAssembly::Dx)
+}
+
+fn process_return_instruction(value: ValueIR) -> Vec<InstructionAssembly> {
     let mut instructions = Vec::new();
     let src_operand = process_value(value);
     instructions.push(InstructionAssembly::Mov {
@@ -95,14 +191,15 @@ fn process_return_instruction(value: &ValueIR) -> Vec<InstructionAssembly> {
     instructions
 }
 
-fn process_value(value: &ValueIR) -> OperandAssembly {
+fn process_value(value: ValueIR) -> OperandAssembly {
     match value {
-        ValueIR::ConstantIR(val) => OperandAssembly::Immediate(*val),
-        ValueIR::VariableIR(name) => OperandAssembly::PseudoRegister(name.clone()),
+        ValueIR::ConstantIR(val) => OperandAssembly::Immediate(val),
+        ValueIR::VariableIR(name) => OperandAssembly::PseudoRegister(name),
     }
 }
 
-// Process first AST to replace pseudoregisters with stack addresses and then allocate stack space
+// Memory Allocation and assembly fixes section. todo: move to separate module
+// Process first AST to replace pseudoregisters with stack addresses and then allocate stack space. Register allocation
 
 /// Replaces pseudoregisters in a function definition with stack addresses,
 /// allocates stack space, and fixes invalid move instructions.
@@ -124,20 +221,19 @@ fn process_value(value: &ValueIR) -> OperandAssembly {
 /// # Errors
 ///
 /// Returns a `CodeGenError` if any transformation step fails.
-fn replace_pseudoregisters(
+fn fix_assembly_ast(
     function_def: FunctionDefinitionAssembly,
 ) -> Result<FunctionDefinitionAssembly, CodeGenError> {
-    let (ast_with_stack_addresses, stack_offset) =
-        replace_pseudoregisters_with_stack_address(function_def);
+    let (ast_with_stack_addresses, stack_offset) = fix_function(function_def);
     // Add the stack allocation instruction at the beginning of the function to allocate space for all stack variables.
     let allocated_function = allocate_function_stack_space(ast_with_stack_addresses, stack_offset);
     // Fix broken Mov instructions
-    Ok(fix_broken_moves(allocated_function))
+    Ok(fix_invalid_instructions_with_invalid_operands(
+        allocated_function,
+    )) //todo: This can be combined inside fix_function to just iterate once over the instructions
 }
 
-fn replace_pseudoregisters_with_stack_address(
-    function_def: FunctionDefinitionAssembly,
-) -> (FunctionDefinitionAssembly, i32) {
+fn fix_function(function_def: FunctionDefinitionAssembly) -> (FunctionDefinitionAssembly, i32) {
     match function_def {
         FunctionDefinitionAssembly::Function {
             identifier,
@@ -149,27 +245,18 @@ fn replace_pseudoregisters_with_stack_address(
 
             for instr in instructions {
                 match instr {
+                    // todo: This section is replacing pseudoregisters with stack addresses. Encapsulate it in a function and move this to a separate module
                     InstructionAssembly::Mov { src, dst } => {
-                        let updated_src = match src {
-                            OperandAssembly::PseudoRegister(name) => {
-                                replace_pseudoregister_with_stack_address(
-                                    &name,
-                                    &mut stack_offset,
-                                    &mut identifier_with_stack_offset,
-                                )
-                            }
-                            _ => src,
-                        };
-                        let updated_dst = match dst {
-                            OperandAssembly::PseudoRegister(name) => {
-                                replace_pseudoregister_with_stack_address(
-                                    &name,
-                                    &mut stack_offset,
-                                    &mut identifier_with_stack_offset,
-                                )
-                            }
-                            _ => dst,
-                        };
+                        let updated_src = replace_operand_pseudoregister(
+                            src,
+                            &mut stack_offset,
+                            &mut identifier_with_stack_offset,
+                        );
+                        let updated_dst = replace_operand_pseudoregister(
+                            dst,
+                            &mut stack_offset,
+                            &mut identifier_with_stack_offset,
+                        );
                         updated_instructions.push(InstructionAssembly::Mov {
                             src: updated_src,
                             dst: updated_dst,
@@ -179,19 +266,45 @@ fn replace_pseudoregisters_with_stack_address(
                         unary_operator,
                         operand,
                     } => {
-                        let updated_operand = match operand {
-                            OperandAssembly::PseudoRegister(name) => {
-                                replace_pseudoregister_with_stack_address(
-                                    &name,
-                                    &mut stack_offset,
-                                    &mut identifier_with_stack_offset,
-                                )
-                            }
-                            _ => operand,
-                        };
+                        let updated_operand = replace_operand_pseudoregister(
+                            operand,
+                            &mut stack_offset,
+                            &mut identifier_with_stack_offset,
+                        );
                         updated_instructions.push(InstructionAssembly::Unary {
                             unary_operator,
                             operand: updated_operand,
+                        });
+                    }
+                    InstructionAssembly::Binary {
+                        binary_operator,
+                        left_operand,
+                        right_operand,
+                    } => {
+                        let updated_left_operand = replace_operand_pseudoregister(
+                            left_operand,
+                            &mut stack_offset,
+                            &mut identifier_with_stack_offset,
+                        );
+                        let updated_right_operand = replace_operand_pseudoregister(
+                            right_operand,
+                            &mut stack_offset,
+                            &mut identifier_with_stack_offset,
+                        );
+                        updated_instructions.push(InstructionAssembly::Binary {
+                            binary_operator,
+                            left_operand: updated_left_operand,
+                            right_operand: updated_right_operand,
+                        });
+                    }
+                    InstructionAssembly::Idiv { divisor } => {
+                        let updated_divisor = replace_operand_pseudoregister(
+                            divisor,
+                            &mut stack_offset,
+                            &mut identifier_with_stack_offset,
+                        );
+                        updated_instructions.push(InstructionAssembly::Idiv {
+                            divisor: updated_divisor,
                         });
                     }
                     _ => updated_instructions.push(instr),
@@ -208,17 +321,22 @@ fn replace_pseudoregisters_with_stack_address(
     }
 }
 
-fn replace_pseudoregister_with_stack_address(
-    name: &str,
+// If the operand is a pseudoregisterv replaces it with a stack variable address or returns. If the pseudoregister has not been seen before, it assigns a new stack offset.
+fn replace_operand_pseudoregister(
+    operand: OperandAssembly,
     stack_offset: &mut i32,
     identifier_with_stack_offset: &mut HashMap<String, i32>,
 ) -> OperandAssembly {
-    if let Some(offset) = identifier_with_stack_offset.get(name) {
-        return OperandAssembly::StackVariable(*offset);
+    if let OperandAssembly::PseudoRegister(name) = operand {
+        if let Some(offset) = identifier_with_stack_offset.get(&name) {
+            return OperandAssembly::StackVariable(*offset); // Make it negative to address from RBP downwards
+        }
+        *stack_offset += 4; // 4 bytes per variable
+        identifier_with_stack_offset.insert(name.to_string(), *stack_offset);
+        OperandAssembly::StackVariable(*stack_offset)
+    } else {
+        operand
     }
-    *stack_offset -= 4; // 4 bytes per variable
-    identifier_with_stack_offset.insert(name.to_string(), *stack_offset);
-    OperandAssembly::StackVariable(*stack_offset)
 }
 
 fn allocate_function_stack_space(
@@ -238,8 +356,10 @@ fn allocate_function_stack_space(
     }
 }
 
-// After replacing the pseudoregisters  with stack addresses, it is possible to have a move instruction with memory addresses as both operands. This is invalid, an it has to be replaced by two moves with an auxiliary register
-fn fix_broken_moves(function: FunctionDefinitionAssembly) -> FunctionDefinitionAssembly {
+// After replacing the pseudoregisters  with stack addresses, it is possible to have a instructions with invalid operand like two stack variables for an instruction that doesn't accept them. This function fixes them
+fn fix_invalid_instructions_with_invalid_operands(
+    function: FunctionDefinitionAssembly,
+) -> FunctionDefinitionAssembly {
     let FunctionDefinitionAssembly::Function {
         identifier,
         mut instructions,
@@ -247,13 +367,13 @@ fn fix_broken_moves(function: FunctionDefinitionAssembly) -> FunctionDefinitionA
     let mut updated_instructions: Vec<InstructionAssembly> = Vec::with_capacity(instructions.len());
 
     for instruction in instructions.drain(..) {
-        match &instruction {
-            // Both operands are stack variables, use auxiliary register (R10) with two moves
+        match instruction {
+            // Operations with two stack variables as operands that are invalid are fixed using an auxiliary register
             InstructionAssembly::Mov {
                 src: src_operand @ OperandAssembly::StackVariable(_),
                 dst: dst_operand @ OperandAssembly::StackVariable(_),
             } => {
-                let aux_reg = OperandAssembly::Register(RegisterAssembly::R10);
+                let aux_reg = OperandAssembly::Register(RegisterAssembly::R10); 
 
                 updated_instructions.extend([
                     InstructionAssembly::Mov {
@@ -266,6 +386,63 @@ fn fix_broken_moves(function: FunctionDefinitionAssembly) -> FunctionDefinitionA
                     },
                 ]);
             }
+            InstructionAssembly::Binary {
+                binary_operator:
+                    binary_operator @ (BinaryOperatorAssembly::AdditionAssembly
+                    | BinaryOperatorAssembly::SubtractionAssembly),
+                left_operand: left_operand @ OperandAssembly::StackVariable(_),
+                right_operand: right_operand @ OperandAssembly::StackVariable(_),
+            } => {
+                let aux_reg = OperandAssembly::Register(RegisterAssembly::R10);
+
+                updated_instructions.extend([
+                    InstructionAssembly::Mov {
+                        src: left_operand.clone(),
+                        dst: aux_reg.clone(),
+                    },
+                    InstructionAssembly::Binary {
+                        binary_operator: binary_operator,
+                        left_operand: aux_reg,
+                        right_operand: right_operand,
+                    },
+                ]);
+            }
+            // Imul instruction can't use a memory address as the destination. Move to an auxiliary register first and then back
+            InstructionAssembly::Binary {
+                binary_operator: BinaryOperatorAssembly::MultiplicationAssembly,
+                left_operand ,
+                right_operand: right_operand @ OperandAssembly::StackVariable(_),
+            } => {
+                let aux_reg = OperandAssembly::Register(RegisterAssembly::R11);
+
+                updated_instructions.extend([
+                    InstructionAssembly::Mov {
+                        src: right_operand.clone(),
+                        dst: aux_reg.clone(),
+                    },
+                    InstructionAssembly::Binary {
+                        binary_operator: BinaryOperatorAssembly::MultiplicationAssembly,
+                        left_operand: left_operand,
+                        right_operand: aux_reg.clone(),
+                    },
+                    InstructionAssembly::Mov {
+                        src: aux_reg,
+                        dst: right_operand,
+                    },
+                ]);
+            }
+            // Fix invalid idiv with constant divisor
+                InstructionAssembly::Idiv {
+                    divisor: divisor @ OperandAssembly::Immediate(_),
+                } => {
+                    updated_instructions.push(InstructionAssembly::Mov {
+                        src: divisor,
+                        dst: OperandAssembly::Register(RegisterAssembly::R10),
+                    });
+                    updated_instructions.push(InstructionAssembly::Idiv {
+                        divisor: OperandAssembly::Register(RegisterAssembly::R10),
+                    });
+                }
             // Any other instruction — keep as is
             _ => updated_instructions.push(instruction),
         }

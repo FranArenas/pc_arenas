@@ -1,13 +1,13 @@
-use std::fmt;
+use std::fmt::{self, Debug};
 
 use crate::frontend::lexer::{Token, TokenType};
 use crate::frontend::program_ast::{
-    Expression, FunctionDefinition, ProgramAst, Statement, UnaryOperator,
+    BinaryOperator, Expression, Factor, FunctionDefinition, ProgramAst, Statement, UnaryOperator,
 };
 
 #[derive(Debug, Clone)]
 pub struct ParseError {
-    pub expected: Vec<TokenType>,
+    pub expected: Vec<TokenType>, // todo: Change to string to describe expected tokens better
     pub found: Token,
     pub position: usize,
     pub message: String,
@@ -17,8 +17,8 @@ impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Unexpected token error at position {}: expected {:?}, found {:?}. Message Error: {}",
-            self.position, self.expected, self.found.token_type, self.message
+            "Unexpected token error at position {}:{} : expected {:?}, found {:?}. Message Error: {}",
+            self.found.line, self.found.column, self.expected, self.found.token_type, self.message
         )
     }
 }
@@ -89,7 +89,7 @@ impl<'a> Parser<'a> {
 
     fn parse_statement(&mut self) -> Result<Statement, ParseError> {
         self.consume(TokenType::ReturnKeyword, "Expected return keyword")?;
-        let return_value = self.parse_expression()?;
+        let return_value = self.parse_expression(0)?;
         self.consume(
             TokenType::Semicolon,
             "Expected semicolon after return statement",
@@ -97,41 +97,66 @@ impl<'a> Parser<'a> {
         Ok(Statement::Return(return_value))
     }
 
-    fn parse_expression(&mut self) -> Result<Expression, ParseError> {
+    fn parse_factor(&mut self) -> Result<Factor, ParseError> {
         let peeked_token = self.current_token();
-
-        let expression = match peeked_token.token_type {
+        match peeked_token.token_type {
             TokenType::IntLiteral(value) => {
                 self.advance();
-                Expression::Constant(value)
+                Ok(Factor::IntLiteral(value))
             }
             // Unary operators
             TokenType::Negation | TokenType::BitwiseComplement => {
                 let operator = self.parse_unary_operator()?;
-                let inner_expr = self.parse_expression()?;
-                Expression::UnaryOp(operator, Box::new(inner_expr))
+                let inner_factor = self.parse_factor()?;
+                Ok(Factor::UnaryOp(operator, Box::new(inner_factor)))
             }
             // Parentheses
             TokenType::OpenParen => {
                 let line = peeked_token.line;
                 let column = peeked_token.column;
                 self.advance();
-                let inner_expr = self.parse_expression()?;
+                let inner_expr = self.parse_expression(0)?; // Minimum precedence is 0 because the expression is parenthesized
                 self.consume(TokenType::CloseParen, &format!("Expected closing parenthesis to match opened parenthesis at position {}:{}", line, column))?;
-                inner_expr
+                Ok(Factor::Expression(Box::new(inner_expr)))
             }
             _ => {
                 let error = ParseError {
-                    expected: vec![TokenType::IntLiteral(0)], // 0 is a placeholder
+                    expected: vec![
+                        TokenType::IntLiteral(0),
+                        TokenType::Negation,
+                        TokenType::BitwiseComplement,
+                        TokenType::OpenParen,
+                    ], // 0 is a placeholder
                     found: peeked_token.clone(),
                     position: self.current_index,
-                    message: "Expected an integer literal".to_string(),
+                    message: "Expected a factor".to_string(),
                 };
-                return Err(error);
+                Err(error)
             }
-        };
+        }
+    }
+    // To parse the expression precedence climbing is used to handle precedence and associativity
+    fn parse_expression(&mut self, minimum_precedence: u8) -> Result<Expression, ParseError> {
+        let mut left_expr = Expression::Factor(self.parse_factor()?);
+        while self.current_token().token_type.is_binary_operator() {
+            let precedence = self
+                .current_token()
+                .token_type
+                .get_precedence()
+                .expect("Expected a binary operator here");
+            if precedence < minimum_precedence {
+                break;
+            }
+            let operator = self.parse_binary_operator()?;
+            let right_expression = self.parse_expression(precedence + 1)?;
+            left_expr = Expression::BinaryOperator {
+                operator,
+                left: Box::new(left_expr),
+                right: Box::new(right_expression),
+            };
+        }
 
-        Ok(expression)
+        Ok(left_expr)
     }
 
     fn parse_unary_operator(&mut self) -> Result<UnaryOperator, ParseError> {
@@ -144,6 +169,32 @@ impl<'a> Parser<'a> {
                     found: self.current_token().clone(),
                     position: self.current_index,
                     message: "Expected a unary operator".to_string(),
+                };
+                return Err(error);
+            }
+        };
+        self.advance();
+        Ok(operator)
+    }
+
+    fn parse_binary_operator(&mut self) -> Result<BinaryOperator, ParseError> {
+        let operator = match self.current_token().token_type {
+            TokenType::Add => BinaryOperator::Addition,
+            TokenType::Negation => BinaryOperator::Subtraction, // Note: Negation here is used as subtraction in binary context
+            TokenType::Multiply => BinaryOperator::Multiplication,
+            TokenType::Divide => BinaryOperator::Division,
+            TokenType::Modulus => BinaryOperator::Modulus,
+            _ => {
+                let error = ParseError {
+                    expected: vec![
+                        TokenType::Add,
+                        TokenType::Multiply,
+                        TokenType::Divide,
+                        TokenType::Modulus,
+                    ], // Placeholder
+                    found: self.current_token().clone(),
+                    position: self.current_index,
+                    message: "Expected a binary operator".to_string(),
                 };
                 return Err(error);
             }

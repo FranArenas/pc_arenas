@@ -72,19 +72,55 @@ impl IndentedDisplay for Statement {
 // Expression
 #[derive(Debug, Clone)]
 pub enum Expression {
-    Constant(i64),
-    UnaryOp(UnaryOperator, Box<Expression>),
+    Factor(Factor),
+    BinaryOperator {
+        operator: BinaryOperator,
+        left: Box<Expression>,
+        right: Box<Expression>,
+    },
 }
 
 impl IndentedDisplay for Expression {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, indent: &str) -> fmt::Result {
         match self {
-            Expression::Constant(value) => {
-                writeln!(f, "{}└── Constant: {}", indent, value)
+            Expression::Factor(factor) => {
+                writeln!(f, "{}└── Factor", indent)?;
+                factor.fmt_with_indent(f, &format!("{}    ", indent))
             }
-            Expression::UnaryOp(operator, expression) => {
+            Expression::BinaryOperator {
+                operator,
+                left,
+                right,
+            } => {
+                writeln!(f, "{}└── BinaryOperator: {}", indent, operator)?; // todo: Check if this looks good
+                left.fmt_with_indent(f, &format!("{}    ", indent))?;
+                right.fmt_with_indent(f, &format!("{}    ", indent))
+            }
+        }
+    }
+}
+
+// Factor
+#[derive(Debug, Clone)]
+pub enum Factor {
+    IntLiteral(i64),
+    UnaryOp(UnaryOperator, Box<Factor>),
+    Expression(Box<Expression>), // Boxed to avoid recursive size issues due to recursion with Expression
+}
+
+impl IndentedDisplay for Factor {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, indent: &str) -> fmt::Result {
+        match self {
+            Factor::IntLiteral(value) => {
+                writeln!(f, "{}└── IntLiteral: {}", indent, value)
+            }
+            Factor::UnaryOp(operator, factor) => {
                 writeln!(f, "{}└── UnaryOp: {}", indent, operator)?;
-                expression.fmt_with_indent(f, &format!("{}    ", indent))
+                factor.fmt_with_indent(f, &format!("{}    ", indent))
+            }
+            Factor::Expression(expr) => {
+                writeln!(f, "{}└── Expression", indent)?;
+                expr.fmt_with_indent(f, &format!("{}    ", indent))
             }
         }
     }
@@ -106,5 +142,27 @@ impl fmt::Display for UnaryOperator {
     }
 }
 
+// BinaryOperator
+#[derive(Debug, Clone)]
+pub enum BinaryOperator {
+    Addition,
+    Subtraction,
+    Multiplication,
+    Division,
+    Modulus,
+}
+
+impl fmt::Display for BinaryOperator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BinaryOperator::Addition => write!(f, "Addition (+)"),
+            BinaryOperator::Subtraction => write!(f, "Subtraction (-)"),
+            BinaryOperator::Multiplication => write!(f, "Multiplication (*)"),
+            BinaryOperator::Division => write!(f, "Division (/)"),
+            BinaryOperator::Modulus => write!(f, "Modulus (%)"),
+        }
+    }
+}
+
 // Generate Display implementations for all types that implement IndentedDisplay
-impl_display!(FunctionDefinition, Statement, Expression);
+impl_display!(FunctionDefinition, Statement, Expression, Factor);
