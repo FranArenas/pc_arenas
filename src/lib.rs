@@ -9,4 +9,4 @@ pub use frontend::program_ast::{Expression, FunctionDefinition, ProgramAst, Stat
 pub mod backend;
 pub use backend::assembly_definition::ProgramAssembly;
 pub use backend::assembly_generation::{CodeGenError, generate_code};
-pub use backend::code_emission::{CodeEmissionError, CodeEmitter};
+pub use backend::assemblyx86::{CodeEmissionError, CodeEmitter};

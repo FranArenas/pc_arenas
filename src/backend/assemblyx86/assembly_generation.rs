@@ -373,7 +373,7 @@ fn fix_invalid_instructions_with_invalid_operands(
                 src: src_operand @ OperandAssembly::StackVariable(_),
                 dst: dst_operand @ OperandAssembly::StackVariable(_),
             } => {
-                let aux_reg = OperandAssembly::Register(RegisterAssembly::R10); 
+                let aux_reg = OperandAssembly::Register(RegisterAssembly::R10);
 
                 updated_instructions.extend([
                     InstructionAssembly::Mov {
@@ -410,7 +410,7 @@ fn fix_invalid_instructions_with_invalid_operands(
             // Imul instruction can't use a memory address as the destination. Move to an auxiliary register first and then back
             InstructionAssembly::Binary {
                 binary_operator: BinaryOperatorAssembly::MultiplicationAssembly,
-                left_operand ,
+                left_operand,
                 right_operand: right_operand @ OperandAssembly::StackVariable(_),
             } => {
                 let aux_reg = OperandAssembly::Register(RegisterAssembly::R11);
@@ -432,17 +432,17 @@ fn fix_invalid_instructions_with_invalid_operands(
                 ]);
             }
             // Fix invalid idiv with constant divisor
-                InstructionAssembly::Idiv {
-                    divisor: divisor @ OperandAssembly::Immediate(_),
-                } => {
-                    updated_instructions.push(InstructionAssembly::Mov {
-                        src: divisor,
-                        dst: OperandAssembly::Register(RegisterAssembly::R10),
-                    });
-                    updated_instructions.push(InstructionAssembly::Idiv {
-                        divisor: OperandAssembly::Register(RegisterAssembly::R10),
-                    });
-                }
+            InstructionAssembly::Idiv {
+                divisor: divisor @ OperandAssembly::Immediate(_),
+            } => {
+                updated_instructions.push(InstructionAssembly::Mov {
+                    src: divisor,
+                    dst: OperandAssembly::Register(RegisterAssembly::R10),
+                });
+                updated_instructions.push(InstructionAssembly::Idiv {
+                    divisor: OperandAssembly::Register(RegisterAssembly::R10),
+                });
+            }
             // Any other instruction — keep as is
             _ => updated_instructions.push(instruction),
         }

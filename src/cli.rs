@@ -33,10 +33,6 @@ struct CliArgs {
     #[arg(long = "print-program-ast", default_value_t = true)]
     print_program_ast: bool,
 
-    /// Stop after printing the assembly AST
-    #[arg(long = "print-assembly-ast", default_value_t = true)]
-    print_assembly_ast: bool,
-
     /// Stop after code generation
     #[arg(long = "codegen", default_value_t = false)]
     stop_after_codegen: bool,
@@ -65,10 +61,8 @@ pub struct Cli {
     pub stop_after_lexing: bool,
     /// Stop after parsing
     pub stop_after_parsing: bool,
-    /// Stop after printing the program AST
+    /// Print the program AST
     pub print_program_ast: bool,
-    /// Stop after printing the assembly AST
-    pub print_assembly_ast: bool,
     /// Stop after code generation
     pub stop_after_codegen: bool,
     /// Print the intermediate representation (IR)
@@ -139,7 +133,6 @@ impl Cli {
             stop_after_lexing: cli_args.stop_after_lexing,
             stop_after_parsing: cli_args.stop_after_parsing,
             print_program_ast: cli_args.print_program_ast,
-            print_assembly_ast: cli_args.print_assembly_ast,
             stop_after_codegen: cli_args.stop_after_codegen,
             print_ir: cli_args.print_ir,
             stop_after_ir: cli_args.stop_after_ir,

@@ -100,11 +100,6 @@ fn compile(
     // Step 4: assembly code generation
     let assembly = generate_assembly(ir)?;
 
-    if cli.print_assembly_ast {
-        println!("Assembly Representation:\n");
-        println!("{}", assembly);
-    }
-
     if cli.stop_after_codegen {
         return Ok(());
     }

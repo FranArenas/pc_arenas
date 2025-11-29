@@ -1,7 +1,7 @@
-pub mod code_emission;
+pub mod assemblyx86;
 pub mod intermediate_representation;
 
-pub use code_emission::{
+pub use assemblyx86::{
     CodeEmissionError, CodeEmitter, CodeGenError, FunctionDefinitionAssembly, InstructionAssembly,
     OperandAssembly, ProgramAssembly, assembly_definition, assembly_generation, generate_code,
 };
