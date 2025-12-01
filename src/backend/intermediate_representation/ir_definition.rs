@@ -118,6 +118,11 @@ pub enum BinaryOperatorIR {
     MultiplicationIR,
     DivisionIR,
     ModulusIR,
+    BitwiseAndIR,
+    BitwiseOrIR,
+    BitwiseXorIR,
+    ShiftLeftIR,
+    ShiftRightIR,
 }
 impl fmt::Display for BinaryOperatorIR {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -127,6 +132,11 @@ impl fmt::Display for BinaryOperatorIR {
             BinaryOperatorIR::MultiplicationIR => write!(f, "MULTIPLY"),
             BinaryOperatorIR::DivisionIR => write!(f, "DIVIDE"),
             BinaryOperatorIR::ModulusIR => write!(f, "MODULUS"),
+            BinaryOperatorIR::BitwiseAndIR => write!(f, "BITWISE_AND"),
+            BinaryOperatorIR::BitwiseOrIR => write!(f, "BITWISE_OR"),
+            BinaryOperatorIR::BitwiseXorIR => write!(f, "BITWISE_XOR"),
+            BinaryOperatorIR::ShiftLeftIR => write!(f, "SHIFT_LEFT"),
+            BinaryOperatorIR::ShiftRightIR => write!(f, "SHIFT_RIGHT"),
         }
     }
 }

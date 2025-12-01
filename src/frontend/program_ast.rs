@@ -150,6 +150,11 @@ pub enum BinaryOperator {
     Multiplication,
     Division,
     Modulus,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    ShiftLeft,
+    ShiftRight,
 }
 
 impl fmt::Display for BinaryOperator {
@@ -160,6 +165,11 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::Multiplication => write!(f, "Multiplication (*)"),
             BinaryOperator::Division => write!(f, "Division (/)"),
             BinaryOperator::Modulus => write!(f, "Modulus (%)"),
+            BinaryOperator::BitwiseAnd => write!(f, "BitwiseAnd (&)"),
+            BinaryOperator::BitwiseOr => write!(f, "BitwiseOr (|)"),
+            BinaryOperator::BitwiseXor => write!(f, "BitwiseXor (^)"),
+            BinaryOperator::ShiftLeft => write!(f, "ShiftLeft (<<)"),
+            BinaryOperator::ShiftRight => write!(f, "ShiftRight (>>)"),
         }
     }
 }

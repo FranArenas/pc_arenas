@@ -2,8 +2,7 @@ use std::collections::HashMap;
 
 use crate::backend::{
     assembly_definition::{
-        BinaryOperatorAssembly, FunctionDefinitionAssembly, InstructionAssembly, OperandAssembly,
-        ProgramAssembly, RegisterAssembly, UnaryOperatorAssembly,
+        BinaryOperatorAssembly, FunctionDefinitionAssembly, InstructionAssembly, InstructionSize, OperandAssembly, ProgramAssembly, RegisterAssembly, UnaryOperatorAssembly
     },
     intermediate_representation::ir_definition::{
         BinaryOperatorIR, FunctionDefinitionIR, InstructionIR, ProgramIR, UnaryOperatorIR, ValueIR,
@@ -84,6 +83,7 @@ fn process_unary_instruction(
     instructions.push(InstructionAssembly::Mov {
         src: src_operand,
         dst: dst_operand.clone(),
+        size: InstructionSize::DoubleWord,
     });
     instructions.push(InstructionAssembly::Unary {
         unary_operator: operator,
@@ -103,6 +103,11 @@ fn process_binary_instruction(
         BinaryOperatorIR::AdditionIR => BinaryOperatorAssembly::AdditionAssembly,
         BinaryOperatorIR::SubtractionIR => BinaryOperatorAssembly::SubtractionAssembly,
         BinaryOperatorIR::MultiplicationIR => BinaryOperatorAssembly::MultiplicationAssembly,
+        BinaryOperatorIR::BitwiseAndIR => BinaryOperatorAssembly::BitwiseAndAssembly,
+        BinaryOperatorIR::BitwiseOrIR => BinaryOperatorAssembly::BitwiseOrAssembly,
+        BinaryOperatorIR::BitwiseXorIR => BinaryOperatorAssembly::BitwiseXorAssembly,
+        BinaryOperatorIR::ShiftLeftIR => BinaryOperatorAssembly::ShiftLeftAssembly,
+        BinaryOperatorIR::ShiftRightIR => BinaryOperatorAssembly::ShiftRightAssembly,
         BinaryOperatorIR::DivisionIR => {
             return process_division_instruction(left_operand, right_operand, dst);
         }
@@ -120,6 +125,7 @@ fn process_binary_instruction(
         // In x86 assembly the result is stored in the right operand
         src: left_operand,
         dst: dst_operand.clone(),
+        size: InstructionSize::DoubleWord,
     });
     instructions.push(InstructionAssembly::Binary {
         binary_operator: operator,
@@ -142,6 +148,7 @@ fn process_div_mod_common(
     instructions.push(InstructionAssembly::Mov {
         src: process_value(dividend),
         dst: OperandAssembly::Register(RegisterAssembly::Ax),
+        size: InstructionSize::DoubleWord,
     });
 
     // Sign-extend EAX into EDX:EAX
@@ -156,6 +163,7 @@ fn process_div_mod_common(
     instructions.push(InstructionAssembly::Mov {
         src: OperandAssembly::Register(result_reg),
         dst: process_value(dst),
+        size: InstructionSize::DoubleWord,
     });
 
     instructions
@@ -183,6 +191,7 @@ fn process_return_instruction(value: ValueIR) -> Vec<InstructionAssembly> {
     instructions.push(InstructionAssembly::Mov {
         src: src_operand,
         dst: OperandAssembly::Register(RegisterAssembly::Ax),
+        size: InstructionSize::DoubleWord,
     }); // Placeholder for MOV instruction to move return value to appropriate register
     instructions.push(InstructionAssembly::Ret);
     instructions
@@ -225,7 +234,7 @@ fn replace_pseudoregisters(
 
             for instr in instructions {
                 match instr {
-                    InstructionAssembly::Mov { src, dst } => {
+                    InstructionAssembly::Mov { src, dst, size } => {
                         let updated_src = replace_operand_pseudoregister(
                             src,
                             &mut stack_offset,
@@ -239,6 +248,7 @@ fn replace_pseudoregisters(
                         updated_instructions.push(InstructionAssembly::Mov {
                             src: updated_src,
                             dst: updated_dst,
+                            size: size,
                         });
                     }
                     InstructionAssembly::Unary {
@@ -349,6 +359,7 @@ fn fix_invalid_instructions(function: FunctionDefinitionAssembly) -> FunctionDef
             InstructionAssembly::Mov {
                 src: src_operand @ OperandAssembly::StackVariable(_),
                 dst: dst_operand @ OperandAssembly::StackVariable(_),
+                size,
             } => {
                 let aux_reg = OperandAssembly::Register(RegisterAssembly::R10);
 
@@ -356,27 +367,57 @@ fn fix_invalid_instructions(function: FunctionDefinitionAssembly) -> FunctionDef
                     InstructionAssembly::Mov {
                         src: src_operand.clone(),
                         dst: aux_reg.clone(),
+                        size: size.clone(),
                     },
                     InstructionAssembly::Mov {
                         src: aux_reg,
                         dst: dst_operand.clone(),
+                        size: size,
                     },
                 ]);
             }
-            // Add/Sub instructions with two stack variables as operands that are invalid in x86 assembly. Move left operand to auxiliary register first
+            // Shift instructions need to use the CL register for the count when the count is variable
             InstructionAssembly::Binary {
                 binary_operator:
-                    binary_operator @ (BinaryOperatorAssembly::AdditionAssembly
-                    | BinaryOperatorAssembly::SubtractionAssembly),
+                    binary_operator @ (BinaryOperatorAssembly::ShiftLeftAssembly
+                    | BinaryOperatorAssembly::ShiftRightAssembly),
+                left_operand: count,
+                right_operand: destination,
+            } if !matches!(count, OperandAssembly::Register(RegisterAssembly::Cl) | OperandAssembly::Immediate(_)) => {
+                let cl_reg = OperandAssembly::Register(RegisterAssembly::Cl);
+
+                // Move count to CL
+                updated_instructions.push(InstructionAssembly::Mov {
+                    src: count,
+                    dst: cl_reg.clone(),
+                    size: InstructionSize::Byte, // CL is an 8-bit register
+                });
+
+                // Perform shift using CL
+                updated_instructions.push(InstructionAssembly::Binary {
+                    binary_operator,
+                    left_operand: cl_reg,
+                    right_operand: destination
+                });
+            }
+            // Binary instructions (except shifts and multiplication, that have special requirements) with two stack variables as operands that are invalid in x86 assembly. Move left operand to auxiliary register first
+            InstructionAssembly::Binary {
+                binary_operator,
                 left_operand: left_operand @ OperandAssembly::StackVariable(_),
                 right_operand: right_operand @ OperandAssembly::StackVariable(_),
-            } => {
+            } if !matches!(
+                binary_operator,
+                BinaryOperatorAssembly::ShiftLeftAssembly
+                    | BinaryOperatorAssembly::ShiftRightAssembly
+                    | BinaryOperatorAssembly::MultiplicationAssembly
+            ) => {
                 let aux_reg = OperandAssembly::Register(RegisterAssembly::R10);
 
                 updated_instructions.extend([
                     InstructionAssembly::Mov {
                         src: left_operand.clone(),
                         dst: aux_reg.clone(),
+                        size: InstructionSize::DoubleWord,
                     },
                     InstructionAssembly::Binary {
                         binary_operator: binary_operator,
@@ -397,6 +438,7 @@ fn fix_invalid_instructions(function: FunctionDefinitionAssembly) -> FunctionDef
                     InstructionAssembly::Mov {
                         src: right_operand.clone(),
                         dst: aux_reg.clone(),
+                        size: InstructionSize::DoubleWord,
                     },
                     InstructionAssembly::Binary {
                         binary_operator: BinaryOperatorAssembly::MultiplicationAssembly,
@@ -406,6 +448,7 @@ fn fix_invalid_instructions(function: FunctionDefinitionAssembly) -> FunctionDef
                     InstructionAssembly::Mov {
                         src: aux_reg,
                         dst: right_operand,
+                        size: InstructionSize::DoubleWord,
                     },
                 ]);
             }
@@ -416,6 +459,7 @@ fn fix_invalid_instructions(function: FunctionDefinitionAssembly) -> FunctionDef
                 updated_instructions.push(InstructionAssembly::Mov {
                     src: divisor,
                     dst: OperandAssembly::Register(RegisterAssembly::R10),
+                    size: InstructionSize::DoubleWord,
                 });
                 updated_instructions.push(InstructionAssembly::Idiv {
                     divisor: OperandAssembly::Register(RegisterAssembly::R10),

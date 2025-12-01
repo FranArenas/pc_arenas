@@ -23,6 +23,13 @@ pub enum TokenType {
     Divide,   // /
     Modulus,  // %
 
+    // bitwise operators
+    BitwiseAnd, // &
+    BitwiseOr,  // |
+    BitwiseXor, // ^
+    ShiftLeft,  // <<
+    ShiftRight, // >>
+
     // Others
     OpenParen,
     CloseParen,
@@ -43,6 +50,11 @@ impl TokenType {
                 | TokenType::Divide
                 | TokenType::Modulus
                 | TokenType::Negation // Note: Negation can also be unary
+                | TokenType::BitwiseAnd
+                | TokenType::BitwiseOr
+                | TokenType::BitwiseXor
+                | TokenType::ShiftLeft
+                | TokenType::ShiftRight
         )
     }
 
@@ -50,6 +62,10 @@ impl TokenType {
         match self {
             TokenType::Add | TokenType::Negation => Some(45),
             TokenType::Multiply | TokenType::Divide | TokenType::Modulus => Some(50),
+            TokenType::ShiftLeft | TokenType::ShiftRight => Some(40),
+            TokenType::BitwiseAnd => Some(35),
+            TokenType::BitwiseXor => Some(30),
+            TokenType::BitwiseOr => Some(25),
             _ => None,
         }
     }
@@ -236,6 +252,43 @@ pub fn tokenize(input: &str) -> (Vec<Token>, Vec<LexError>) {
             '*' => tokens.push(Token::new(TokenType::Multiply, lexer.row, lexer.column)),
             '/' => tokens.push(Token::new(TokenType::Divide, lexer.row, lexer.column)),
             '%' => tokens.push(Token::new(TokenType::Modulus, lexer.row, lexer.column)),
+            // Bitwise operators
+            '&' => tokens.push(Token::new(TokenType::BitwiseAnd, lexer.row, lexer.column)),
+            '|' => tokens.push(Token::new(TokenType::BitwiseOr, lexer.row, lexer.column)),
+            '^' => tokens.push(Token::new(TokenType::BitwiseXor, lexer.row, lexer.column)),
+            // Shift operators
+            '<' => { // todo: Change this once relational operators are implemented
+                if matches!(lexer.peek(), Some(&'<')) {
+                    lexer.next(); // Consume the second '<'
+                    tokens.push(Token::new(
+                        TokenType::ShiftLeft,
+                        lexer.row,
+                        lexer.column - 1, // -1 because we consumed an extra character with next()
+                    ));
+                } else {
+                    errors.push(LexError::InvalidCharacter {
+                        ch: '<',
+                        line: lexer.row,
+                        column: lexer.column,
+                    });
+                }
+            }
+            '>' => {
+                if matches!(lexer.peek(), Some(&'>')) {
+                    lexer.next(); // Consume the second '>'
+                    tokens.push(Token::new(
+                        TokenType::ShiftRight,
+                        lexer.row,
+                        lexer.column - 1, // -1 because we consumed an extra character with next()
+                    ));
+                } else {
+                    errors.push(LexError::InvalidCharacter {
+                        ch: '>',
+                        line: lexer.row,
+                        column: lexer.column,
+                    });
+                }
+            }
             // Others
             '(' => tokens.push(Token::new(TokenType::OpenParen, lexer.row, lexer.column)),
             ')' => tokens.push(Token::new(TokenType::CloseParen, lexer.row, lexer.column)),

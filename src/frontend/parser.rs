@@ -1,4 +1,5 @@
 use std::fmt::{self, Debug};
+use std::mem::discriminant;
 
 use crate::frontend::lexer::{Token, TokenType};
 use crate::frontend::program_ast::{
@@ -7,19 +8,14 @@ use crate::frontend::program_ast::{
 
 #[derive(Debug, Clone)]
 pub struct ParseError {
-    pub expected: Vec<TokenType>, // todo: Change to string to describe expected tokens better
-    pub found: Token,
-    pub position: usize,
+    pub line: usize,
+    pub column: usize,
     pub message: String,
 }
 
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Unexpected token error at position {}:{} : expected {:?}, found {:?}. Message Error: {}",
-            self.found.line, self.found.column, self.expected, self.found.token_type, self.message
-        )
+        write!(f, "Parse error at line {}, column {}: {}", self.line, self.column, self.message)
     }
 }
 
@@ -121,15 +117,12 @@ impl<'a> Parser<'a> {
             }
             _ => {
                 let error = ParseError {
-                    expected: vec![
-                        TokenType::IntLiteral(0),
-                        TokenType::Negation,
-                        TokenType::BitwiseComplement,
-                        TokenType::OpenParen,
-                    ], // 0 is a placeholder
-                    found: peeked_token.clone(),
-                    position: self.current_index,
-                    message: "Expected a factor".to_string(),
+                    line: peeked_token.line,
+                    column: peeked_token.column,
+                    message: format!(
+                        "Expected a factor (integer literal, unary operator, or parenthesized expression), found {:?}",
+                        peeked_token.token_type
+                    ),
                 };
                 Err(error)
             }
@@ -137,7 +130,7 @@ impl<'a> Parser<'a> {
     }
     // To parse the expression precedence climbing is used to handle precedence and associativity
     fn parse_expression(&mut self, minimum_precedence: u8) -> Result<Expression, ParseError> {
-        let mut left_expr = Expression::Factor(self.parse_factor()?);
+        let mut left_expr = Expression::Factor(self.parse_factor()?); //todo: Fix this. It is broken
         while self.current_token().token_type.is_binary_operator() {
             let precedence = self
                 .current_token()
@@ -164,11 +157,14 @@ impl<'a> Parser<'a> {
             TokenType::Negation => UnaryOperator::Negation,
             TokenType::BitwiseComplement => UnaryOperator::BitwiseComplement,
             _ => {
+                let current = self.current_token();
                 let error = ParseError {
-                    expected: vec![TokenType::Negation, TokenType::BitwiseComplement], // Placeholder
-                    found: self.current_token().clone(),
-                    position: self.current_index,
-                    message: "Expected a unary operator".to_string(),
+                    line: current.line,
+                    column: current.column,
+                    message: format!(
+                        "Expected a unary operator (- or ~), found {:?}",
+                        current.token_type
+                    ),
                 };
                 return Err(error);
             }
@@ -184,17 +180,20 @@ impl<'a> Parser<'a> {
             TokenType::Multiply => BinaryOperator::Multiplication,
             TokenType::Divide => BinaryOperator::Division,
             TokenType::Modulus => BinaryOperator::Modulus,
+            TokenType::BitwiseAnd => BinaryOperator::BitwiseAnd,
+            TokenType::BitwiseOr => BinaryOperator::BitwiseOr,
+            TokenType::BitwiseXor => BinaryOperator::BitwiseXor,
+            TokenType::ShiftLeft => BinaryOperator::ShiftLeft,
+            TokenType::ShiftRight => BinaryOperator::ShiftRight,
             _ => {
+                let current = self.current_token();
                 let error = ParseError {
-                    expected: vec![
-                        TokenType::Add,
-                        TokenType::Multiply,
-                        TokenType::Divide,
-                        TokenType::Modulus,
-                    ], // Placeholder
-                    found: self.current_token().clone(),
-                    position: self.current_index,
-                    message: "Expected a binary operator".to_string(),
+                    line: current.line,
+                    column: current.column,
+                    message: format!(
+                        "Expected a binary operator (+, -, *, /, % or bitwise operator), found {:?}",
+                        current.token_type
+                    ),
                 };
                 return Err(error);
             }
@@ -203,48 +202,27 @@ impl<'a> Parser<'a> {
         Ok(operator)
     }
 
-    fn consume(&mut self, expected: TokenType, message: &str) -> Result<TokenType, ParseError> {
-        if let Err(mut err) = self.check(&expected) {
-            err.message = message.to_string();
-            return Err(err);
-        }
 
-        let consumed_token = Ok(self.current_token().token_type.clone());
-
-        self.advance();
-
-        consumed_token
+fn consume(
+    &mut self,
+    expected: TokenType,
+    message: &str,
+) -> Result<TokenType, ParseError> {
+    // Compare only the variant (ignore inner values)
+    if discriminant(&self.current_token().token_type) != discriminant(&expected) {
+        return Err(ParseError {
+            line: self.current_token().line,
+            column: self.current_token().column,
+            message: message.to_string(),
+        });
     }
 
-    fn check(&mut self, expected: &TokenType) -> Result<(), ParseError> {
-        let is_expected = match expected {
-            TokenType::Identifier(_) => {
-                matches!(self.current_token().token_type, TokenType::Identifier(_))
-            }
-            TokenType::IntLiteral(_) => {
-                matches!(self.current_token().token_type, TokenType::IntLiteral(_))
-            }
-            _ => &self.current_token().token_type == expected,
-        };
+    let consumed_token = Ok(self.current_token().token_type.clone());
+    self.advance();
+    consumed_token
+}
 
-        if !is_expected {
-            let error = ParseError {
-                expected: vec![expected.clone()],
-                found: self.current_token().clone(),
-                position: self.current_index,
-                message: "Unexpected token".to_string(),
-            };
-            return Err(error);
-        }
-        Ok(())
-    }
 
-    fn peek(&self) -> &Token {
-        if self.current_index + 1 < self.tokens.len() {
-            return &self.tokens[self.current_index + 1];
-        }
-        panic!("Tried to peek beyond the end of the token list")
-    }
 
     fn advance(&mut self) {
         self.current_index += 1;
@@ -252,29 +230,6 @@ impl<'a> Parser<'a> {
 
     fn current_token(&self) -> &Token {
         &self.tokens[self.current_index]
-    }
-
-    fn is_end(&self) -> bool {
-        self.tokens[self.current_index].token_type == TokenType::EndOfFile
-    }
-
-    fn synchronize(&mut self) {
-        while !self.is_end() {
-            if self.current_token().token_type == TokenType::Semicolon {
-                self.advance();
-                return;
-            }
-
-            match self.peek().token_type {
-                TokenType::IntKeyword
-                | TokenType::VoidKeyword
-                | TokenType::ReturnKeyword
-                | TokenType::Identifier(_) => {
-                    return;
-                }
-                _ => self.advance(),
-            }
-        }
     }
 }
 

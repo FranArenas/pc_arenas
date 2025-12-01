@@ -116,12 +116,31 @@ impl GenerateAssembly for FunctionDefinitionAssembly {
 // ===============================================
 // Instructions
 // ===============================================
+#[derive(Debug, Clone)]
+pub enum InstructionSize {
+    Byte, // 8 bits. 
+    Word, // 16 bits. 
+    DoubleWord, // 32 bits. 
+    QuadWord, // 64 bits. 
+}
+impl Display for InstructionSize {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        let s = match self {
+            InstructionSize::Byte => "b",
+            InstructionSize::Word => "w",
+            InstructionSize::DoubleWord => "l",
+            InstructionSize::QuadWord => "q",
+        };
+        write!(f, "{}", s)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum InstructionAssembly {
     Mov {
         src: OperandAssembly,
         dst: OperandAssembly,
+        size:InstructionSize,
     },
     Unary {
         unary_operator: UnaryOperatorAssembly,
@@ -145,7 +164,7 @@ pub enum InstructionAssembly {
 impl GenerateAssembly for InstructionAssembly {
     fn write(&self, writer: &mut AsmWriter) {
         match self {
-            InstructionAssembly::Mov { src, dst } => writer.line(format!("movl {}, {}", src, dst)),
+            InstructionAssembly::Mov { src, dst , size} => writer.line(format!("mov{} {}, {}", size, src,  dst)),
 
             InstructionAssembly::Unary {
                 unary_operator,
@@ -209,6 +228,7 @@ impl Display for OperandAssembly {
 pub enum RegisterAssembly {
     Ax,
     Dx,
+    Cl,
     R10,
     R11,
 }
@@ -218,6 +238,7 @@ impl Display for RegisterAssembly {
         let s = match self {
             RegisterAssembly::Ax => "eax",
             RegisterAssembly::Dx => "edx",
+            RegisterAssembly::Cl => "cl", // Used for shift operations
             RegisterAssembly::R10 => "r10d",
             RegisterAssembly::R11 => "r11d",
         };
@@ -254,6 +275,11 @@ pub enum BinaryOperatorAssembly {
     AdditionAssembly,
     SubtractionAssembly,
     MultiplicationAssembly,
+    BitwiseAndAssembly,
+    BitwiseOrAssembly,
+    BitwiseXorAssembly,
+    ShiftLeftAssembly,
+    ShiftRightAssembly,
 }
 
 impl Display for BinaryOperatorAssembly {
@@ -262,6 +288,11 @@ impl Display for BinaryOperatorAssembly {
             BinaryOperatorAssembly::AdditionAssembly => "addl",
             BinaryOperatorAssembly::SubtractionAssembly => "subl",
             BinaryOperatorAssembly::MultiplicationAssembly => "imull",
+            BinaryOperatorAssembly::BitwiseAndAssembly => "andl",
+            BinaryOperatorAssembly::BitwiseOrAssembly => "orl",
+            BinaryOperatorAssembly::BitwiseXorAssembly => "xorl",
+            BinaryOperatorAssembly::ShiftLeftAssembly => "sall",
+            BinaryOperatorAssembly::ShiftRightAssembly => "sarl",
         };
         write!(f, "{}", s)
     }

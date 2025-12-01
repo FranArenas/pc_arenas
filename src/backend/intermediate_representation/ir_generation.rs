@@ -70,6 +70,11 @@ fn process_expression_ir_recursive(
                 BinaryOperator::Multiplication => BinaryOperatorIR::MultiplicationIR,
                 BinaryOperator::Division => BinaryOperatorIR::DivisionIR,
                 BinaryOperator::Modulus => BinaryOperatorIR::ModulusIR,
+                BinaryOperator::BitwiseAnd => BinaryOperatorIR::BitwiseAndIR,
+                BinaryOperator::BitwiseOr => BinaryOperatorIR::BitwiseOrIR,
+                BinaryOperator::BitwiseXor => BinaryOperatorIR::BitwiseXorIR,
+                BinaryOperator::ShiftLeft => BinaryOperatorIR::ShiftLeftIR,
+                BinaryOperator::ShiftRight => BinaryOperatorIR::ShiftRightIR,
             };
             let dst_value = ValueIR::VariableIR(tmp_var_name);
             instructions.push(InstructionIR::BinaryIR {
