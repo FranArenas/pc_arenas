@@ -118,10 +118,10 @@ impl GenerateAssembly for FunctionDefinitionAssembly {
 // ===============================================
 #[derive(Debug, Clone)]
 pub enum InstructionSize {
-    Byte, // 8 bits. 
-    Word, // 16 bits. 
-    DoubleWord, // 32 bits. 
-    QuadWord, // 64 bits. 
+    Byte,       // 8 bits.
+    Word,       // 16 bits.
+    DoubleWord, // 32 bits.
+    QuadWord,   // 64 bits.
 }
 impl Display for InstructionSize {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
@@ -140,7 +140,7 @@ pub enum InstructionAssembly {
     Mov {
         src: OperandAssembly,
         dst: OperandAssembly,
-        size:InstructionSize,
+        size: InstructionSize,
     },
     Unary {
         unary_operator: UnaryOperatorAssembly,
@@ -154,6 +154,24 @@ pub enum InstructionAssembly {
     Idiv {
         divisor: OperandAssembly,
     },
+    Cmp {
+        left_operand: OperandAssembly,
+        right_operand: OperandAssembly,
+    },
+    Jmp {
+        label: String,
+    },
+    JmpCC {
+        condition: ConditionCodeAssembly,
+        label: String,
+    },
+    SetCC {
+        condition: ConditionCodeAssembly,
+        dst: OperandAssembly,
+    },
+    Label {
+        identifier: String,
+    },
     Cdq,
     AllocateStack {
         size: i32,
@@ -164,7 +182,9 @@ pub enum InstructionAssembly {
 impl GenerateAssembly for InstructionAssembly {
     fn write(&self, writer: &mut AsmWriter) {
         match self {
-            InstructionAssembly::Mov { src, dst , size} => writer.line(format!("mov{} {}, {}", size, src,  dst)),
+            InstructionAssembly::Mov { src, dst, size } => {
+                writer.line(format!("mov{} {}, {}", size, src, dst))
+            }
 
             InstructionAssembly::Unary {
                 unary_operator,
@@ -193,6 +213,23 @@ impl GenerateAssembly for InstructionAssembly {
             InstructionAssembly::Idiv { divisor } => writer.line(format!("idivl {}", divisor)),
 
             InstructionAssembly::Cdq => writer.line("cdq"),
+            InstructionAssembly::Cmp {
+                left_operand,
+                right_operand,
+            } => writer.line(format!("cmpl {}, {}", left_operand, right_operand)),
+            InstructionAssembly::Jmp { label } => writer.line(format!("jmp .L{}", label)), // .L prefix is used to mark labels as local to avoid conflicts with user defined functions
+            InstructionAssembly::JmpCC { condition, label } => {
+                writer.line(format!("j{} .L{}", condition, label))
+            }
+            InstructionAssembly::SetCC { condition, dst } => {
+                writer.line(format!("set{} {}", condition, dst))
+            }
+            InstructionAssembly::Label { identifier } => {
+                // Labels are not indented
+                writer.indent -= 1;
+                writer.line(format!(".L{}:", identifier)); // .L prefix is used to mark labels as local to avoid conflicts with user defined functions
+                writer.indent += 1;
+            }
         }
     }
 }
@@ -226,21 +263,34 @@ impl Display for OperandAssembly {
 
 #[derive(Debug, Clone)]
 pub enum RegisterAssembly {
-    Ax,
-    Dx,
+    // AX
+    Eax,
+    Al,
+    // DX
+    Edx,
+    Dl,
+    // CL
     Cl,
-    R10,
-    R11,
+    // R10
+    R10d,
+    R10b,
+    // R11
+    R11d,
+    R11b,
 }
 
 impl Display for RegisterAssembly {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         let s = match self {
-            RegisterAssembly::Ax => "eax",
-            RegisterAssembly::Dx => "edx",
+            RegisterAssembly::Eax => "eax",
+            RegisterAssembly::Al => "al",
+            RegisterAssembly::Edx => "edx",
+            RegisterAssembly::Dl => "dl",
             RegisterAssembly::Cl => "cl", // Used for shift operations
-            RegisterAssembly::R10 => "r10d",
-            RegisterAssembly::R11 => "r11d",
+            RegisterAssembly::R10d => "r10d",
+            RegisterAssembly::R10b => "r10b",
+            RegisterAssembly::R11d => "r11d",
+            RegisterAssembly::R11b => "r11b",
         };
         write!(f, "{}", s)
     }
@@ -293,6 +343,32 @@ impl Display for BinaryOperatorAssembly {
             BinaryOperatorAssembly::BitwiseXorAssembly => "xorl",
             BinaryOperatorAssembly::ShiftLeftAssembly => "sall",
             BinaryOperatorAssembly::ShiftRightAssembly => "sarl",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+// ===============================================
+// Others
+// ===============================================
+#[derive(Debug, Clone)]
+pub enum ConditionCodeAssembly {
+    Equal,
+    NotEqual,
+    LessThan,
+    LessThanOrEqual,
+    GreaterThan,
+    GreaterThanOrEqual,
+}
+impl Display for ConditionCodeAssembly {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        let s = match self {
+            ConditionCodeAssembly::Equal => "e",
+            ConditionCodeAssembly::NotEqual => "ne",
+            ConditionCodeAssembly::LessThan => "l",
+            ConditionCodeAssembly::LessThanOrEqual => "le",
+            ConditionCodeAssembly::GreaterThan => "g",
+            ConditionCodeAssembly::GreaterThanOrEqual => "ge",
         };
         write!(f, "{}", s)
     }

@@ -15,7 +15,11 @@ pub struct ParseError {
 
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Parse error at line {}, column {}: {}", self.line, self.column, self.message)
+        write!(
+            f,
+            "Parse error at line {}, column {}: {}",
+            self.line, self.column, self.message
+        )
     }
 }
 
@@ -101,7 +105,7 @@ impl<'a> Parser<'a> {
                 Ok(Factor::IntLiteral(value))
             }
             // Unary operators
-            TokenType::Negation | TokenType::BitwiseComplement => {
+            TokenType::Negation | TokenType::BitwiseComplement | TokenType::LogicalNot => {
                 let operator = self.parse_unary_operator()?;
                 let inner_factor = self.parse_factor()?;
                 Ok(Factor::UnaryOp(operator, Box::new(inner_factor)))
@@ -130,7 +134,7 @@ impl<'a> Parser<'a> {
     }
     // To parse the expression precedence climbing is used to handle precedence and associativity
     fn parse_expression(&mut self, minimum_precedence: u8) -> Result<Expression, ParseError> {
-        let mut left_expr = Expression::Factor(self.parse_factor()?); //todo: Fix this. It is broken
+        let mut left_expr = Expression::Factor(self.parse_factor()?);
         while self.current_token().token_type.is_binary_operator() {
             let precedence = self
                 .current_token()
@@ -156,6 +160,7 @@ impl<'a> Parser<'a> {
         let operator = match self.current_token().token_type {
             TokenType::Negation => UnaryOperator::Negation,
             TokenType::BitwiseComplement => UnaryOperator::BitwiseComplement,
+            TokenType::LogicalNot => UnaryOperator::LogicalNot,
             _ => {
                 let current = self.current_token();
                 let error = ParseError {
@@ -185,6 +190,14 @@ impl<'a> Parser<'a> {
             TokenType::BitwiseXor => BinaryOperator::BitwiseXor,
             TokenType::ShiftLeft => BinaryOperator::ShiftLeft,
             TokenType::ShiftRight => BinaryOperator::ShiftRight,
+            TokenType::LogicalAnd => BinaryOperator::LogicalAnd,
+            TokenType::LogicalOr => BinaryOperator::LogicalOr,
+            TokenType::Equal => BinaryOperator::Equal,
+            TokenType::NotEqual => BinaryOperator::NotEqual,
+            TokenType::LessThan => BinaryOperator::LessThan,
+            TokenType::GreaterThan => BinaryOperator::GreaterThan,
+            TokenType::LessThanOrEqual => BinaryOperator::LessThanOrEqual,
+            TokenType::GreaterThanOrEqual => BinaryOperator::GreaterThanOrEqual,
             _ => {
                 let current = self.current_token();
                 let error = ParseError {
@@ -202,27 +215,20 @@ impl<'a> Parser<'a> {
         Ok(operator)
     }
 
+    fn consume(&mut self, expected: TokenType, message: &str) -> Result<TokenType, ParseError> {
+        // Compare only the variant (ignore inner values)
+        if discriminant(&self.current_token().token_type) != discriminant(&expected) {
+            return Err(ParseError {
+                line: self.current_token().line,
+                column: self.current_token().column,
+                message: message.to_string(),
+            });
+        }
 
-fn consume(
-    &mut self,
-    expected: TokenType,
-    message: &str,
-) -> Result<TokenType, ParseError> {
-    // Compare only the variant (ignore inner values)
-    if discriminant(&self.current_token().token_type) != discriminant(&expected) {
-        return Err(ParseError {
-            line: self.current_token().line,
-            column: self.current_token().column,
-            message: message.to_string(),
-        });
+        let consumed_token = Ok(self.current_token().token_type.clone());
+        self.advance();
+        consumed_token
     }
-
-    let consumed_token = Ok(self.current_token().token_type.clone());
-    self.advance();
-    consumed_token
-}
-
-
 
     fn advance(&mut self) {
         self.current_index += 1;

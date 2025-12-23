@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use crate::backend::{
     assembly_definition::{
-        BinaryOperatorAssembly, FunctionDefinitionAssembly, InstructionAssembly, InstructionSize, OperandAssembly, ProgramAssembly, RegisterAssembly, UnaryOperatorAssembly
+        BinaryOperatorAssembly, ConditionCodeAssembly, FunctionDefinitionAssembly,
+        InstructionAssembly, InstructionSize, OperandAssembly, ProgramAssembly, RegisterAssembly,
+        UnaryOperatorAssembly,
     },
     intermediate_representation::ir_definition::{
         BinaryOperatorIR, FunctionDefinitionIR, InstructionIR, ProgramIR, UnaryOperatorIR, ValueIR,
@@ -62,6 +64,33 @@ fn process_instructions(instructions_ir: Vec<InstructionIR>) -> Vec<InstructionA
                 right_operand,
                 dst,
             )),
+            InstructionIR::JumpIR { label_identifier } => {
+                assembly_ins.extend(process_jump_instruction(label_identifier));
+            }
+            InstructionIR::JumpIfNotZeroIR {
+                condition,
+                label_identifier,
+            } => {
+                assembly_ins.extend(process_jump_if_not_zero_instruction(
+                    condition,
+                    label_identifier,
+                ));
+            }
+            InstructionIR::JumpIfZeroIR {
+                condition,
+                label_identifier,
+            } => {
+                assembly_ins.extend(process_jump_if_zero_instruction(
+                    condition,
+                    label_identifier,
+                ));
+            }
+            InstructionIR::LabelIR { identifier } => {
+                assembly_ins.extend(process_label_instruction(identifier));
+            }
+            InstructionIR::CopyIR { src, dst } => {
+                assembly_ins.extend(process_copy_instruction(src, dst));
+            }
         }
     }
     assembly_ins
@@ -76,6 +105,15 @@ fn process_unary_instruction(
     let operator = match unary_operator {
         UnaryOperatorIR::NegationIR => UnaryOperatorAssembly::NegationAssembly,
         UnaryOperatorIR::BitwiseComplementIR => UnaryOperatorAssembly::BitwiseNotAssembly,
+        UnaryOperatorIR::LogicalNotIR => {
+            // Logical not is implemented as a equal comparison with zero as it is the same operation in x86 assembly
+            return process_comparison_instruction(
+                src,
+                ValueIR::ConstantIR(0),
+                dst,
+                ConditionCodeAssembly::Equal,
+            );
+        }
     };
     let src_operand = process_value(src);
     let dst_operand = process_value(dst);
@@ -114,6 +152,54 @@ fn process_binary_instruction(
         BinaryOperatorIR::ModulusIR => {
             return process_modulo_instruction(left_operand, right_operand, dst);
         }
+        BinaryOperatorIR::EqualIR => {
+            return process_comparison_instruction(
+                left_operand,
+                right_operand,
+                dst,
+                ConditionCodeAssembly::Equal,
+            );
+        }
+        BinaryOperatorIR::NotEqualIR => {
+            return process_comparison_instruction(
+                left_operand,
+                right_operand,
+                dst,
+                ConditionCodeAssembly::NotEqual,
+            );
+        }
+        BinaryOperatorIR::LessThanIR => {
+            return process_comparison_instruction(
+                left_operand,
+                right_operand,
+                dst,
+                ConditionCodeAssembly::LessThan,
+            );
+        }
+        BinaryOperatorIR::LessThanOrEqualIR => {
+            return process_comparison_instruction(
+                left_operand,
+                right_operand,
+                dst,
+                ConditionCodeAssembly::LessThanOrEqual,
+            );
+        }
+        BinaryOperatorIR::GreaterThanIR => {
+            return process_comparison_instruction(
+                left_operand,
+                right_operand,
+                dst,
+                ConditionCodeAssembly::GreaterThan,
+            );
+        }
+        BinaryOperatorIR::GreaterThanOrEqualIR => {
+            return process_comparison_instruction(
+                left_operand,
+                right_operand,
+                dst,
+                ConditionCodeAssembly::GreaterThanOrEqual,
+            );
+        }
     };
     let left_operand = process_value(left_operand);
     let right_operand = process_value(right_operand);
@@ -147,7 +233,7 @@ fn process_div_mod_common(
     // Move dividend into AX
     instructions.push(InstructionAssembly::Mov {
         src: process_value(dividend),
-        dst: OperandAssembly::Register(RegisterAssembly::Ax),
+        dst: OperandAssembly::Register(RegisterAssembly::Eax),
         size: InstructionSize::DoubleWord,
     });
 
@@ -174,7 +260,7 @@ fn process_division_instruction(
     divisor: ValueIR,
     dst: ValueIR,
 ) -> Vec<InstructionAssembly> {
-    process_div_mod_common(dividend, divisor, dst, RegisterAssembly::Ax)
+    process_div_mod_common(dividend, divisor, dst, RegisterAssembly::Eax)
 }
 
 fn process_modulo_instruction(
@@ -182,7 +268,104 @@ fn process_modulo_instruction(
     divisor: ValueIR,
     dst: ValueIR,
 ) -> Vec<InstructionAssembly> {
-    process_div_mod_common(dividend, divisor, dst, RegisterAssembly::Dx)
+    process_div_mod_common(dividend, divisor, dst, RegisterAssembly::Edx)
+}
+
+fn process_comparison_instruction(
+    left_operand: ValueIR,
+    right_operand: ValueIR,
+    dst: ValueIR,
+    condition: ConditionCodeAssembly,
+) -> Vec<InstructionAssembly> {
+    let mut instructions = Vec::new();
+
+    // process operands
+    let left_operand = process_value(left_operand);
+    let right_operand = process_value(right_operand);
+    let dst_operand = process_value(dst);
+
+    // Compare left and right operands. Swap them as cmp in x86 is: right - left -> right
+    instructions.push(InstructionAssembly::Cmp {
+        left_operand: right_operand,
+        right_operand: left_operand,
+    });
+
+    // Zero out dst as Setcc only sets the lowest byte
+    instructions.push(InstructionAssembly::Mov {
+        src: OperandAssembly::Immediate(0),
+        dst: dst_operand.clone(),
+        size: InstructionSize::DoubleWord,
+    });
+
+    // Set dst with the result of the comparison
+    instructions.push(InstructionAssembly::SetCC {
+        condition: condition,
+        dst: dst_operand,
+    });
+    instructions
+}
+
+fn process_jump_instruction(label_identifier: String) -> Vec<InstructionAssembly> {
+    let mut instructions = Vec::new();
+    instructions.push(InstructionAssembly::Jmp {
+        label: label_identifier,
+    });
+    instructions
+}
+
+fn process_jump_if_not_zero_instruction(
+    condition: ValueIR,
+    label_identifier: String,
+) -> Vec<InstructionAssembly> {
+    let mut instructions = Vec::new();
+    let condition_operand = process_value(condition);
+
+    instructions.push(InstructionAssembly::Cmp {
+        left_operand: OperandAssembly::Immediate(0),
+        right_operand: condition_operand,
+    });
+    instructions.push(InstructionAssembly::JmpCC {
+        condition: ConditionCodeAssembly::NotEqual,
+        label: label_identifier,
+    });
+    instructions
+}
+
+fn process_jump_if_zero_instruction(
+    condition: ValueIR,
+    label_identifier: String,
+) -> Vec<InstructionAssembly> {
+    let mut instructions = Vec::new();
+    let condition_operand = process_value(condition);
+
+    instructions.push(InstructionAssembly::Cmp {
+        left_operand: OperandAssembly::Immediate(0),
+        right_operand: condition_operand,
+    });
+    instructions.push(InstructionAssembly::JmpCC {
+        condition: ConditionCodeAssembly::Equal,
+        label: label_identifier,
+    });
+    instructions
+}
+
+fn process_label_instruction(identifier: String) -> Vec<InstructionAssembly> {
+    let mut instructions = Vec::new();
+    instructions.push(InstructionAssembly::Label { identifier });
+    instructions
+}
+
+fn process_copy_instruction(src: ValueIR, dst: ValueIR) -> Vec<InstructionAssembly> {
+    let mut instructions = Vec::new();
+    let src_operand = process_value(src);
+    let dst_operand = process_value(dst);
+
+    instructions.push(InstructionAssembly::Mov {
+        src: src_operand,
+        dst: dst_operand,
+        size: InstructionSize::DoubleWord,
+    });
+    instructions
 }
 
 fn process_return_instruction(value: ValueIR) -> Vec<InstructionAssembly> {
@@ -190,7 +373,7 @@ fn process_return_instruction(value: ValueIR) -> Vec<InstructionAssembly> {
     let src_operand = process_value(value);
     instructions.push(InstructionAssembly::Mov {
         src: src_operand,
-        dst: OperandAssembly::Register(RegisterAssembly::Ax),
+        dst: OperandAssembly::Register(RegisterAssembly::Eax),
         size: InstructionSize::DoubleWord,
     }); // Placeholder for MOV instruction to move return value to appropriate register
     instructions.push(InstructionAssembly::Ret);
@@ -230,75 +413,18 @@ fn replace_pseudoregisters(
         } => {
             let mut stack_offset = 0;
             let mut identifier_with_stack_offset: HashMap<String, i32> = HashMap::new();
-            let mut updated_instructions = Vec::new();
 
-            for instr in instructions {
-                match instr {
-                    InstructionAssembly::Mov { src, dst, size } => {
-                        let updated_src = replace_operand_pseudoregister(
-                            src,
-                            &mut stack_offset,
-                            &mut identifier_with_stack_offset,
-                        );
-                        let updated_dst = replace_operand_pseudoregister(
-                            dst,
-                            &mut stack_offset,
-                            &mut identifier_with_stack_offset,
-                        );
-                        updated_instructions.push(InstructionAssembly::Mov {
-                            src: updated_src,
-                            dst: updated_dst,
-                            size: size,
-                        });
-                    }
-                    InstructionAssembly::Unary {
-                        unary_operator,
-                        operand,
-                    } => {
-                        let updated_operand = replace_operand_pseudoregister(
-                            operand,
-                            &mut stack_offset,
-                            &mut identifier_with_stack_offset,
-                        );
-                        updated_instructions.push(InstructionAssembly::Unary {
-                            unary_operator,
-                            operand: updated_operand,
-                        });
-                    }
-                    InstructionAssembly::Binary {
-                        binary_operator,
-                        left_operand,
-                        right_operand,
-                    } => {
-                        let updated_left_operand = replace_operand_pseudoregister(
-                            left_operand,
-                            &mut stack_offset,
-                            &mut identifier_with_stack_offset,
-                        );
-                        let updated_right_operand = replace_operand_pseudoregister(
-                            right_operand,
-                            &mut stack_offset,
-                            &mut identifier_with_stack_offset,
-                        );
-                        updated_instructions.push(InstructionAssembly::Binary {
-                            binary_operator,
-                            left_operand: updated_left_operand,
-                            right_operand: updated_right_operand,
-                        });
-                    }
-                    InstructionAssembly::Idiv { divisor } => {
-                        let updated_divisor = replace_operand_pseudoregister(
-                            divisor,
-                            &mut stack_offset,
-                            &mut identifier_with_stack_offset,
-                        );
-                        updated_instructions.push(InstructionAssembly::Idiv {
-                            divisor: updated_divisor,
-                        });
-                    }
-                    _ => updated_instructions.push(instr),
-                }
-            }
+            let updated_instructions = instructions
+                .into_iter()
+                .map(|instr| {
+                    replace_instruction_operands(
+                        instr,
+                        &mut stack_offset,
+                        &mut identifier_with_stack_offset,
+                    )
+                })
+                .collect();
+
             (
                 FunctionDefinitionAssembly::Function {
                     identifier,
@@ -307,6 +433,77 @@ fn replace_pseudoregisters(
                 stack_offset,
             )
         }
+    }
+}
+
+// Helper function to replace operands in a single instruction
+fn replace_instruction_operands(
+    instruction: InstructionAssembly,
+    stack_offset: &mut i32,
+    identifier_with_stack_offset: &mut HashMap<String, i32>,
+) -> InstructionAssembly {
+    match instruction {
+        InstructionAssembly::Mov { src, dst, size } => InstructionAssembly::Mov {
+            src: replace_operand_pseudoregister(src, stack_offset, identifier_with_stack_offset),
+            dst: replace_operand_pseudoregister(dst, stack_offset, identifier_with_stack_offset),
+            size,
+        },
+        InstructionAssembly::Unary {
+            unary_operator,
+            operand,
+        } => InstructionAssembly::Unary {
+            unary_operator,
+            operand: replace_operand_pseudoregister(
+                operand,
+                stack_offset,
+                identifier_with_stack_offset,
+            ),
+        },
+        InstructionAssembly::Binary {
+            binary_operator,
+            left_operand,
+            right_operand,
+        } => InstructionAssembly::Binary {
+            binary_operator,
+            left_operand: replace_operand_pseudoregister(
+                left_operand,
+                stack_offset,
+                identifier_with_stack_offset,
+            ),
+            right_operand: replace_operand_pseudoregister(
+                right_operand,
+                stack_offset,
+                identifier_with_stack_offset,
+            ),
+        },
+        InstructionAssembly::Idiv { divisor } => InstructionAssembly::Idiv {
+            divisor: replace_operand_pseudoregister(
+                divisor,
+                stack_offset,
+                identifier_with_stack_offset,
+            ),
+        },
+        InstructionAssembly::Cmp {
+            left_operand,
+            right_operand,
+        } => InstructionAssembly::Cmp {
+            left_operand: replace_operand_pseudoregister(
+                left_operand,
+                stack_offset,
+                identifier_with_stack_offset,
+            ),
+            right_operand: replace_operand_pseudoregister(
+                right_operand,
+                stack_offset,
+                identifier_with_stack_offset,
+            ),
+        },
+        InstructionAssembly::SetCC { condition, dst } => InstructionAssembly::SetCC {
+            condition,
+            dst: replace_operand_pseudoregister(dst, stack_offset, identifier_with_stack_offset),
+        },
+        // Instructions without operands pass through unchanged
+        other => other,
     }
 }
 
@@ -361,7 +558,7 @@ fn fix_invalid_instructions(function: FunctionDefinitionAssembly) -> FunctionDef
                 dst: dst_operand @ OperandAssembly::StackVariable(_),
                 size,
             } => {
-                let aux_reg = OperandAssembly::Register(RegisterAssembly::R10);
+                let aux_reg = OperandAssembly::Register(RegisterAssembly::R10d);
 
                 updated_instructions.extend([
                     InstructionAssembly::Mov {
@@ -383,7 +580,11 @@ fn fix_invalid_instructions(function: FunctionDefinitionAssembly) -> FunctionDef
                     | BinaryOperatorAssembly::ShiftRightAssembly),
                 left_operand: count,
                 right_operand: destination,
-            } if !matches!(count, OperandAssembly::Register(RegisterAssembly::Cl) | OperandAssembly::Immediate(_)) => {
+            } if !matches!(
+                count,
+                OperandAssembly::Register(RegisterAssembly::Cl) | OperandAssembly::Immediate(_)
+            ) =>
+            {
                 let cl_reg = OperandAssembly::Register(RegisterAssembly::Cl);
 
                 // Move count to CL
@@ -397,7 +598,7 @@ fn fix_invalid_instructions(function: FunctionDefinitionAssembly) -> FunctionDef
                 updated_instructions.push(InstructionAssembly::Binary {
                     binary_operator,
                     left_operand: cl_reg,
-                    right_operand: destination
+                    right_operand: destination,
                 });
             }
             // Binary instructions (except shifts and multiplication, that have special requirements) with two stack variables as operands that are invalid in x86 assembly. Move left operand to auxiliary register first
@@ -410,8 +611,9 @@ fn fix_invalid_instructions(function: FunctionDefinitionAssembly) -> FunctionDef
                 BinaryOperatorAssembly::ShiftLeftAssembly
                     | BinaryOperatorAssembly::ShiftRightAssembly
                     | BinaryOperatorAssembly::MultiplicationAssembly
-            ) => {
-                let aux_reg = OperandAssembly::Register(RegisterAssembly::R10);
+            ) =>
+            {
+                let aux_reg = OperandAssembly::Register(RegisterAssembly::R10d);
 
                 updated_instructions.extend([
                     InstructionAssembly::Mov {
@@ -432,7 +634,7 @@ fn fix_invalid_instructions(function: FunctionDefinitionAssembly) -> FunctionDef
                 left_operand,
                 right_operand: right_operand @ OperandAssembly::StackVariable(_),
             } => {
-                let aux_reg = OperandAssembly::Register(RegisterAssembly::R11);
+                let aux_reg = OperandAssembly::Register(RegisterAssembly::R11d);
 
                 updated_instructions.extend([
                     InstructionAssembly::Mov {
@@ -458,11 +660,69 @@ fn fix_invalid_instructions(function: FunctionDefinitionAssembly) -> FunctionDef
             } => {
                 updated_instructions.push(InstructionAssembly::Mov {
                     src: divisor,
-                    dst: OperandAssembly::Register(RegisterAssembly::R10),
+                    dst: OperandAssembly::Register(RegisterAssembly::R10d),
                     size: InstructionSize::DoubleWord,
                 });
                 updated_instructions.push(InstructionAssembly::Idiv {
-                    divisor: OperandAssembly::Register(RegisterAssembly::R10),
+                    divisor: OperandAssembly::Register(RegisterAssembly::R10d),
+                });
+            }
+            // Cmp instruction can't use two memory addresses as operands. Move left operand to auxiliary register first
+            InstructionAssembly::Cmp {
+                left_operand: left_operand @ OperandAssembly::StackVariable(_),
+                right_operand: right_operand @ OperandAssembly::StackVariable(_),
+            } => {
+                let aux_reg = OperandAssembly::Register(RegisterAssembly::R10d);
+                updated_instructions.extend([
+                    InstructionAssembly::Mov {
+                        src: left_operand,
+                        dst: aux_reg.clone(),
+                        size: InstructionSize::DoubleWord,
+                    },
+                    InstructionAssembly::Cmp {
+                        left_operand: aux_reg,
+                        right_operand: right_operand,
+                    },
+                ]);
+            }
+            // Cmp can't have a constant as a right operand as it follows the same rule as sub even though this one doesn't store the result
+            InstructionAssembly::Cmp {
+                left_operand,
+                right_operand: right_operand @ OperandAssembly::Immediate(_),
+            } => {
+                let aux_reg = OperandAssembly::Register(RegisterAssembly::R11d);
+                updated_instructions.extend([
+                    InstructionAssembly::Mov {
+                        src: right_operand,
+                        dst: aux_reg.clone(),
+                        size: InstructionSize::DoubleWord,
+                    },
+                    InstructionAssembly::Cmp {
+                        left_operand: left_operand,
+                        right_operand: aux_reg,
+                    },
+                ]);
+            }
+            // SetCC only operates with byte-sized registers. replace the registers with byte size equivalents
+            InstructionAssembly::SetCC { condition, dst } => {
+                let fixed_dst = match dst {
+                    OperandAssembly::Register(RegisterAssembly::Eax) => {
+                        OperandAssembly::Register(RegisterAssembly::Al)
+                    }
+                    OperandAssembly::Register(RegisterAssembly::Edx) => {
+                        OperandAssembly::Register(RegisterAssembly::Dl)
+                    }
+                    OperandAssembly::Register(RegisterAssembly::R10d) => {
+                        OperandAssembly::Register(RegisterAssembly::R10b)
+                    }
+                    OperandAssembly::Register(RegisterAssembly::R11d) => {
+                        OperandAssembly::Register(RegisterAssembly::R11b)
+                    }
+                    other => other,
+                };
+                updated_instructions.push(InstructionAssembly::SetCC {
+                    condition,
+                    dst: fixed_dst,
                 });
             }
             // Any other instruction — keep as is

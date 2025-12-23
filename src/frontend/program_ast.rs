@@ -131,6 +131,7 @@ impl IndentedDisplay for Factor {
 pub enum UnaryOperator {
     BitwiseComplement,
     Negation,
+    LogicalNot,
 }
 
 impl fmt::Display for UnaryOperator {
@@ -138,6 +139,7 @@ impl fmt::Display for UnaryOperator {
         match self {
             UnaryOperator::BitwiseComplement => write!(f, "BitwiseComplement (~)"),
             UnaryOperator::Negation => write!(f, "Negation (-)"),
+            UnaryOperator::LogicalNot => write!(f, "LogicalNot (!)"),
         }
     }
 }
@@ -145,16 +147,28 @@ impl fmt::Display for UnaryOperator {
 // BinaryOperator
 #[derive(Debug, Clone)]
 pub enum BinaryOperator {
+    // Arithmetic operators
     Addition,
     Subtraction,
     Multiplication,
     Division,
     Modulus,
+    // Bitwise operators
     BitwiseAnd,
     BitwiseOr,
     BitwiseXor,
+    // Shift operators
     ShiftLeft,
     ShiftRight,
+    // Logical operators
+    LogicalAnd,
+    LogicalOr,
+    Equal,
+    NotEqual,
+    LessThan,
+    GreaterThan,
+    LessThanOrEqual,
+    GreaterThanOrEqual,
 }
 
 impl fmt::Display for BinaryOperator {
@@ -170,6 +184,14 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::BitwiseXor => write!(f, "BitwiseXor (^)"),
             BinaryOperator::ShiftLeft => write!(f, "ShiftLeft (<<)"),
             BinaryOperator::ShiftRight => write!(f, "ShiftRight (>>)"),
+            BinaryOperator::LogicalAnd => write!(f, "LogicalAnd (&&)"),
+            BinaryOperator::LogicalOr => write!(f, "LogicalOr (||)"),
+            BinaryOperator::Equal => write!(f, "Equal (==)"),
+            BinaryOperator::NotEqual => write!(f, "NotEqual (!=)"),
+            BinaryOperator::LessThan => write!(f, "LessThan (<)"),
+            BinaryOperator::GreaterThan => write!(f, "GreaterThan (>)"),
+            BinaryOperator::LessThanOrEqual => write!(f, "LessThanOrEqual (<=)"),
+            BinaryOperator::GreaterThanOrEqual => write!(f, "GreaterThanOrEqual (>=)"),
         }
     }
 }
