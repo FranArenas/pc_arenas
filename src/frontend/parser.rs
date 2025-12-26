@@ -3,7 +3,8 @@ use std::mem::discriminant;
 
 use crate::frontend::lexer::{Token, TokenType};
 use crate::frontend::program_ast::{
-    BinaryOperator, Expression, Factor, FunctionDefinition, ProgramAst, Statement, UnaryOperator,
+    BinaryOperator, BlockItem, Declaration, Expression, FunctionDefinition, ProgramAst, Statement,
+    UnaryOperator,
 };
 
 #[derive(Debug, Clone)]
@@ -77,17 +78,99 @@ impl<'a> Parser<'a> {
         self.consume(TokenType::CloseParen, "Expected closed parenthesis")?;
         self.consume(TokenType::OpenBrace, "Expected opened brace")?;
 
-        let body = self.parse_statement()?;
+        // Parse function body
+        let mut body = Vec::new();
+
+        while self.current_token().token_type != TokenType::CloseBrace
+            && self.current_token().token_type != TokenType::EndOfFile
+        {
+            body.push(self.parse_block_item()?);
+        }
+
+        if self.current_token().token_type == TokenType::EndOfFile {
+            return Err(ParseError {
+                line: self.current_token().line,
+                column: self.current_token().column,
+                message: "Unexpected end of file while parsing function body".to_string(),
+            });
+        }
 
         self.consume(TokenType::CloseBrace, "Expected closed brace")?;
 
         Ok(FunctionDefinition::Function {
             identifier: name.clone(),
-            body: body.clone(),
+            body: body,
         })
     }
 
+    fn parse_block_item(&mut self) -> Result<BlockItem, ParseError> {
+        match self.current_token().token_type {
+            TokenType::IntKeyword => {
+                return Ok(BlockItem::Declaration(self.parse_declaration()?));
+            }
+            _ => {
+                return Ok(BlockItem::Statement(self.parse_statement()?));
+            }
+        }
+    }
+
+    fn parse_declaration(&mut self) -> Result<Declaration, ParseError> {
+        self.consume(TokenType::IntKeyword, "Expected Int keyword")?;
+        let identifier_token = self.consume(
+            TokenType::Identifier("".to_string()),
+            "Expected variable name after Type keyword",
+        )?; // The string is a placeholder, the consume method checks the variant and not the inner value
+
+        let var_name = match identifier_token {
+            TokenType::Identifier(name) => name,
+            _ => unreachable!(), // We already checked that the token is an identifier in the consume method
+        };
+
+        match self.current_token().token_type {
+            TokenType::Semicolon => {
+                self.advance();
+                Ok(Declaration::VariableDeclaration {
+                    identifier: var_name,
+                    initial_value: None,
+                })
+            }
+            TokenType::Assignment => {
+                self.advance(); // Consume =
+                let initial_value = self.parse_expression(0)?; // Minimum precedence is 0
+                self.consume(
+                    TokenType::Semicolon,
+                    "Expected semicolon after variable declaration",
+                )?;
+                Ok(Declaration::VariableDeclaration {
+                    identifier: var_name,
+                    initial_value: Some(initial_value),
+                })
+            }
+            _ => Err(ParseError {
+                line: self.current_token().line,
+                column: self.current_token().column,
+                message: "Expected semicolon or assignment after variable name".to_string(),
+            }),
+        }
+    }
+
     fn parse_statement(&mut self) -> Result<Statement, ParseError> {
+        match self.current_token().token_type {
+            TokenType::ReturnKeyword => {}
+            TokenType::Semicolon => {
+                self.advance();
+                return Ok(Statement::Null);
+            }
+            _ => {
+                // Parse expressions statement. Only used for expressions with side effects
+                let expr = self.parse_expression(0)?; // Minimum precedence is 0
+                self.consume(
+                    TokenType::Semicolon,
+                    "Expected semicolon after expression statement",
+                )?;
+                return Ok(Statement::Expression(expr));
+            }
+        }
         self.consume(TokenType::ReturnKeyword, "Expected return keyword")?;
         let return_value = self.parse_expression(0)?;
         self.consume(
@@ -97,18 +180,18 @@ impl<'a> Parser<'a> {
         Ok(Statement::Return(return_value))
     }
 
-    fn parse_factor(&mut self) -> Result<Factor, ParseError> {
+    fn parse_factor(&mut self) -> Result<Expression, ParseError> {
         let peeked_token = self.current_token();
         match peeked_token.token_type {
             TokenType::IntLiteral(value) => {
                 self.advance();
-                Ok(Factor::IntLiteral(value))
+                Ok(Expression::Constant(value))
             }
             // Unary operators
             TokenType::Negation | TokenType::BitwiseComplement | TokenType::LogicalNot => {
                 let operator = self.parse_unary_operator()?;
                 let inner_factor = self.parse_factor()?;
-                Ok(Factor::UnaryOp(operator, Box::new(inner_factor)))
+                Ok(Expression::UnaryOp(operator, Box::new(inner_factor)))
             }
             // Parentheses
             TokenType::OpenParen => {
@@ -117,14 +200,19 @@ impl<'a> Parser<'a> {
                 self.advance();
                 let inner_expr = self.parse_expression(0)?; // Minimum precedence is 0 because the expression is parenthesized
                 self.consume(TokenType::CloseParen, &format!("Expected closing parenthesis to match opened parenthesis at position {}:{}", line, column))?;
-                Ok(Factor::Expression(Box::new(inner_expr)))
+                Ok(inner_expr)
+            }
+            TokenType::Identifier(ref name) => {
+                let var_name = name.clone();
+                self.advance();
+                Ok(Expression::Variable(var_name))
             }
             _ => {
                 let error = ParseError {
                     line: peeked_token.line,
                     column: peeked_token.column,
                     message: format!(
-                        "Expected a factor (integer literal, unary operator, or parenthesized expression), found {:?}",
+                        "Expected a factor expression (integer literal, unary operator, variable or parenthesized expression), found {:?}",
                         peeked_token.token_type
                     ),
                 };
@@ -134,22 +222,40 @@ impl<'a> Parser<'a> {
     }
     // To parse the expression precedence climbing is used to handle precedence and associativity
     fn parse_expression(&mut self, minimum_precedence: u8) -> Result<Expression, ParseError> {
-        let mut left_expr = Expression::Factor(self.parse_factor()?);
-        while self.current_token().token_type.is_binary_operator() {
+        let mut left_expr = self.parse_factor()?;
+        while self.current_token().token_type.is_binary_operator()
+            || self.current_token().token_type == TokenType::Assignment
+        {
             let precedence = self
                 .current_token()
                 .token_type
                 .get_precedence()
-                .expect("Expected a binary operator here");
+                .expect("Expected a binary operator or assignment here");
+
             if precedence < minimum_precedence {
                 break;
             }
-            let operator = self.parse_binary_operator()?;
-            let right_expression = self.parse_expression(precedence + 1)?;
-            left_expr = Expression::BinaryOperator {
-                operator,
-                left: Box::new(left_expr),
-                right: Box::new(right_expression),
+
+            match self.current_token().token_type {
+                TokenType::Assignment => {
+                    // Assignment operator is right associative
+                    self.advance(); // Consume = as it was already checked
+                    let right_expression = self.parse_expression(precedence)?; // Do not increase precedence for right associative operators
+                    left_expr = Expression::Assignment {
+                        lvalue: Box::new(left_expr),
+                        value: Box::new(right_expression),
+                    }
+                }
+                _ => {
+                    // All other operators are left associative
+                    let operator = self.parse_binary_operator()?;
+                    let right_expression = self.parse_expression(precedence + 1)?; // Increase for left associative
+                    left_expr = Expression::BinaryOperator {
+                        operator,
+                        left: Box::new(left_expr),
+                        right: Box::new(right_expression),
+                    }
+                }
             };
         }
 

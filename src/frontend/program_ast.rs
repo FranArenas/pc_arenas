@@ -38,7 +38,10 @@ impl fmt::Display for ProgramAst {
 // FunctionDefinition
 #[derive(Debug, Clone)]
 pub enum FunctionDefinition {
-    Function { identifier: String, body: Statement },
+    Function {
+        identifier: String,
+        body: Vec<BlockItem>,
+    },
 }
 
 impl IndentedDisplay for FunctionDefinition {
@@ -46,7 +49,60 @@ impl IndentedDisplay for FunctionDefinition {
         match self {
             FunctionDefinition::Function { identifier, body } => {
                 writeln!(f, "{}└── Function: {}", indent, identifier)?;
-                body.fmt_with_indent(f, &format!("{}    ", indent))
+                writeln!(f, "{}    └── Body", indent)?;
+                for item in body {
+                    item.fmt_with_indent(f, &format!("{}        ", indent))?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+// Block Item. Used in function definitions to define a list of statements and declarations
+#[derive(Debug, Clone)]
+pub enum BlockItem {
+    Declaration(Declaration),
+    Statement(Statement),
+}
+impl IndentedDisplay for BlockItem {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, indent: &str) -> fmt::Result {
+        match self {
+            BlockItem::Declaration(decl) => {
+                writeln!(f, "{}└── Declaration", indent)?;
+                decl.fmt_with_indent(f, &format!("{}    ", indent))
+            }
+            BlockItem::Statement(stmt) => {
+                writeln!(f, "{}└── Statement", indent)?;
+                stmt.fmt_with_indent(f, &format!("{}    ", indent))
+            }
+        }
+    }
+}
+
+// Declaration. Used to declare variables
+#[derive(Debug, Clone)]
+pub enum Declaration {
+    VariableDeclaration {
+        identifier: String,
+        initial_value: Option<Expression>,
+    },
+}
+
+impl IndentedDisplay for Declaration {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, indent: &str) -> fmt::Result {
+        match self {
+            Declaration::VariableDeclaration {
+                identifier,
+                initial_value,
+            } => {
+                writeln!(f, "{}└── VariableDeclaration: {}", indent, identifier)?;
+                if let Some(value) = initial_value {
+                    writeln!(f, "{}    └── InitialValue", indent)?;
+                    value.fmt_with_indent(f, &format!("{}        ", indent))
+                } else {
+                    Ok(())
+                }
             }
         }
     }
@@ -56,6 +112,8 @@ impl IndentedDisplay for FunctionDefinition {
 #[derive(Debug, Clone)]
 pub enum Statement {
     Return(Expression),
+    Expression(Expression), // Used for expression statements, used usually for side effects
+    Null,
 }
 
 impl IndentedDisplay for Statement {
@@ -65,6 +123,13 @@ impl IndentedDisplay for Statement {
                 writeln!(f, "{}└── Return", indent)?;
                 expr.fmt_with_indent(f, &format!("{}    ", indent))
             }
+            Statement::Expression(expr) => {
+                writeln!(f, "{}└── Expression", indent)?;
+                expr.fmt_with_indent(f, &format!("{}    ", indent))
+            }
+            Statement::Null => {
+                writeln!(f, "{}└── Null", indent)
+            }
         }
     }
 }
@@ -72,21 +137,23 @@ impl IndentedDisplay for Statement {
 // Expression
 #[derive(Debug, Clone)]
 pub enum Expression {
-    Factor(Factor),
+    Variable(String),
     BinaryOperator {
         operator: BinaryOperator,
         left: Box<Expression>,
         right: Box<Expression>,
     },
+    Assignment {
+        lvalue: Box<Expression>,
+        value: Box<Expression>,
+    },
+    Constant(i64),
+    UnaryOp(UnaryOperator, Box<Expression>),
 }
 
 impl IndentedDisplay for Expression {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, indent: &str) -> fmt::Result {
         match self {
-            Expression::Factor(factor) => {
-                writeln!(f, "{}└── Factor", indent)?;
-                factor.fmt_with_indent(f, &format!("{}    ", indent))
-            }
             Expression::BinaryOperator {
                 operator,
                 left,
@@ -96,31 +163,20 @@ impl IndentedDisplay for Expression {
                 left.fmt_with_indent(f, &format!("{}    ", indent))?;
                 right.fmt_with_indent(f, &format!("{}    ", indent))
             }
-        }
-    }
-}
-
-// Factor
-#[derive(Debug, Clone)]
-pub enum Factor {
-    IntLiteral(i64),
-    UnaryOp(UnaryOperator, Box<Factor>),
-    Expression(Box<Expression>), // Boxed to avoid recursive size issues due to recursion with Expression
-}
-
-impl IndentedDisplay for Factor {
-    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, indent: &str) -> fmt::Result {
-        match self {
-            Factor::IntLiteral(value) => {
+            Expression::Assignment { lvalue, value } => {
+                writeln!(f, "{}└── Assignment", indent)?;
+                lvalue.fmt_with_indent(f, &format!("{}    ", indent))?;
+                value.fmt_with_indent(f, &format!("{}    ", indent))
+            }
+            Expression::Variable(identifier) => {
+                writeln!(f, "{}└── Variable: {}", indent, identifier)
+            }
+            Expression::Constant(value) => {
                 writeln!(f, "{}└── IntLiteral: {}", indent, value)
             }
-            Factor::UnaryOp(operator, factor) => {
+            Expression::UnaryOp(operator, inner_expr) => {
                 writeln!(f, "{}└── UnaryOp: {}", indent, operator)?;
-                factor.fmt_with_indent(f, &format!("{}    ", indent))
-            }
-            Factor::Expression(expr) => {
-                writeln!(f, "{}└── Expression", indent)?;
-                expr.fmt_with_indent(f, &format!("{}    ", indent))
+                inner_expr.fmt_with_indent(f, &format!("{}    ", indent))
             }
         }
     }
@@ -197,4 +253,10 @@ impl fmt::Display for BinaryOperator {
 }
 
 // Generate Display implementations for all types that implement IndentedDisplay
-impl_display!(FunctionDefinition, Statement, Expression, Factor);
+impl_display!(
+    FunctionDefinition,
+    Statement,
+    Expression,
+    Declaration,
+    BlockItem
+);

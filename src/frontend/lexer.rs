@@ -78,32 +78,36 @@ impl TokenType {
                 | TokenType::GreaterThan
                 | TokenType::LessThanOrEqual
                 | TokenType::GreaterThanOrEqual
+                | TokenType::Assignment // Note: Assignment is treated as a binary operator even though it is handled individually in the parser
         )
     }
 
     pub fn get_precedence(&self) -> Option<u8> {
         match self {
-            TokenType::Multiply | TokenType::Divide | TokenType::Modulus => Some(10),
-            TokenType::Add | TokenType::Negation => Some(9),
-            TokenType::ShiftLeft | TokenType::ShiftRight => Some(8),
+            TokenType::Multiply | TokenType::Divide | TokenType::Modulus => Some(11),
+            TokenType::Add | TokenType::Negation => Some(10),
+            TokenType::ShiftLeft | TokenType::ShiftRight => Some(9),
 
             // Relational (higher than bitwise ops)
             TokenType::GreaterThan
             | TokenType::LessThan
             | TokenType::GreaterThanOrEqual
-            | TokenType::LessThanOrEqual => Some(7),
+            | TokenType::LessThanOrEqual => Some(8),
 
             // Equality
-            TokenType::Equal | TokenType::NotEqual => Some(6),
+            TokenType::Equal | TokenType::NotEqual => Some(7),
 
             // Bitwise
-            TokenType::BitwiseAnd => Some(5),
-            TokenType::BitwiseXor => Some(4),
-            TokenType::BitwiseOr => Some(3),
+            TokenType::BitwiseAnd => Some(6),
+            TokenType::BitwiseXor => Some(5),
+            TokenType::BitwiseOr => Some(4),
 
             // Logical
-            TokenType::LogicalAnd => Some(2),
-            TokenType::LogicalOr => Some(1),
+            TokenType::LogicalAnd => Some(3),
+            TokenType::LogicalOr => Some(2),
+
+            // Assignment has the lowest precedence
+            TokenType::Assignment => Some(1),
             _ => None,
         }
     }

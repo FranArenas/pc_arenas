@@ -1,7 +1,11 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use pc_arenas::{Cli, CodeEmitter, ProgramAssembly};
+use pc_arenas::backend::intermediate_representation::ir_definition::ProgramIR;
+use pc_arenas::backend::intermediate_representation::ir_generation::generate_ir;
+use pc_arenas::{
+    Cli, CodeEmitter, ProgramAssembly, ProgramAst, Token, generate_code, run_semantic_analysis,
+};
 
 /// Tracks which files have been created during compilation for cleanup purposes
 #[derive(Default)]
@@ -74,14 +78,27 @@ fn compile(
     }
 
     // Step 2: Parsing
-    let ast = parse(tokens)?;
+    let raw_ast = parse(tokens)?;
+
+    if cli.print_raw_program_ast {
+        println!("Program AST:\n");
+        println!("{}", raw_ast.clone());
+    }
+
+    if cli.stop_after_parsing {
+        return Ok(());
+    }
+
+    // step 2.5: Semantic Analysis
+    let ast =
+        run_semantic_analysis(raw_ast).map_err(|e| format!("Semantic analysis error: {}", e))?;
 
     if cli.print_program_ast {
         println!("Program AST:\n");
         println!("{}", ast);
     }
 
-    if cli.stop_after_parsing {
+    if cli.stop_after_semantic_analysis {
         return Ok(());
     }
 
@@ -191,9 +208,7 @@ fn lex<P: AsRef<Path>>(
     Ok(tokens)
 }
 
-fn parse(
-    tokens: Vec<pc_arenas::frontend::lexer::Token>,
-) -> Result<pc_arenas::frontend::program_ast::ProgramAst, String> {
+fn parse(tokens: Vec<Token>) -> Result<ProgramAst, String> {
     let ast = pc_arenas::frontend::parser::parse(tokens).map_err(|parse_error| {
         let mut error_messages = Vec::new();
         for error in &parse_error {
@@ -205,16 +220,8 @@ fn parse(
     Ok(ast)
 }
 
-fn generate_ir(
-    ast: pc_arenas::frontend::program_ast::ProgramAst,
-) -> pc_arenas::backend::intermediate_representation::ir_definition::ProgramIR {
-    pc_arenas::backend::intermediate_representation::ir_generation::generate_ir(ast)
-}
-
-fn generate_assembly(
-    ir: pc_arenas::backend::intermediate_representation::ir_definition::ProgramIR,
-) -> Result<ProgramAssembly, String> {
-    let assembly_ast = pc_arenas::backend::assembly_generation::generate_code(ir);
+fn generate_assembly(ir: ProgramIR) -> Result<ProgramAssembly, String> {
+    let assembly_ast = generate_code(ir);
 
     Ok(assembly_ast)
 }

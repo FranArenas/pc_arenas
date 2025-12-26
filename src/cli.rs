@@ -29,6 +29,14 @@ struct CliArgs {
     #[arg(long = "parse", default_value_t = false)]
     stop_after_parsing: bool,
 
+    /// Print the raw program AST (before semantic analysis)
+    #[arg(long = "print-raw-program-ast", default_value_t = false)]
+    print_raw_program_ast: bool,
+
+    /// Stop after semantic analysis
+    #[arg(long = "validate", default_value_t = false)]
+    stop_after_semantic_analysis: bool,
+
     /// Stop after printing the program AST
     #[arg(long = "print-program-ast", default_value_t = true)]
     print_program_ast: bool,
@@ -61,6 +69,10 @@ pub struct Cli {
     pub stop_after_lexing: bool,
     /// Stop after parsing
     pub stop_after_parsing: bool,
+    /// Print the raw program AST (before semantic analysis)
+    pub print_raw_program_ast: bool,
+    /// Stop after semantic analysis
+    pub stop_after_semantic_analysis: bool,
     /// Print the program AST
     pub print_program_ast: bool,
     /// Stop after code generation
@@ -132,6 +144,8 @@ impl Cli {
             save_compiled: cli_args.save_compiled,
             stop_after_lexing: cli_args.stop_after_lexing,
             stop_after_parsing: cli_args.stop_after_parsing,
+            print_raw_program_ast: cli_args.print_raw_program_ast,
+            stop_after_semantic_analysis: cli_args.stop_after_semantic_analysis,
             print_program_ast: cli_args.print_program_ast,
             stop_after_codegen: cli_args.stop_after_codegen,
             print_ir: cli_args.print_ir,
