@@ -2,8 +2,8 @@ use crate::backend::intermediate_representation::ir_definition::{
     BinaryOperatorIR, FunctionDefinitionIR, InstructionIR, ProgramIR, UnaryOperatorIR, ValueIR,
 };
 use crate::frontend::program_ast::{
-    BinaryOperator, BlockItem, Declaration, Expression, FunctionDefinition, ProgramAst, Statement,
-    UnaryOperator,
+    BinaryOperator, BlockItem, CompoundAssignmentOperator, Declaration, Expression,
+    FunctionDefinition, ProgramAst, Statement, UnaryOperator,
 };
 use crate::utils::tmp_var_counter::TMP_VAR_COUNT;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -118,6 +118,15 @@ fn process_expression_ir(expression: Expression, instructions: &mut Vec<Instruct
         Expression::Assignment { lvalue, value } => {
             process_assignment_ir(*lvalue, *value, instructions)
         }
+        Expression::CompoundAssignment {
+            operator,
+            lvalue,
+            value,
+        } => process_compound_assignment_ir(operator, *lvalue, *value, instructions),
+        Expression::PrefixIncrement(expr) => process_prefix_increment_ir(*expr, instructions),
+        Expression::PrefixDecrement(expr) => process_prefix_decrement_ir(*expr, instructions),
+        Expression::PostfixIncrement(expr) => process_postfix_increment_ir(*expr, instructions),
+        Expression::PostfixDecrement(expr) => process_postfix_decrement_ir(*expr, instructions),
     }
 }
 
@@ -307,4 +316,135 @@ fn process_logical_or_ir(
         identifier: end_label,
     });
     result_value
+}
+
+// Compound assignment operators: convert a += b to a = a + b
+fn process_compound_assignment_ir(
+    operator: CompoundAssignmentOperator,
+    lvalue: Expression,
+    value: Expression,
+    instructions: &mut Vec<InstructionIR>,
+) -> ValueIR {
+    if let Expression::Variable(ref identifier) = lvalue {
+        // Convert compound assignment to binary operation
+        let binary_operator = match operator {
+            CompoundAssignmentOperator::AddAssignment => BinaryOperator::Addition,
+            CompoundAssignmentOperator::SubtractAssignment => BinaryOperator::Subtraction,
+            CompoundAssignmentOperator::MultiplyAssignment => BinaryOperator::Multiplication,
+            CompoundAssignmentOperator::DivideAssignment => BinaryOperator::Division,
+            CompoundAssignmentOperator::ModulusAssignment => BinaryOperator::Modulus,
+            CompoundAssignmentOperator::BitwiseAndAssignment => BinaryOperator::BitwiseAnd,
+            CompoundAssignmentOperator::BitwiseOrAssignment => BinaryOperator::BitwiseOr,
+            CompoundAssignmentOperator::BitwiseXorAssignment => BinaryOperator::BitwiseXor,
+            CompoundAssignmentOperator::ShiftLeftAssignment => BinaryOperator::ShiftLeft,
+            CompoundAssignmentOperator::ShiftRightAssignment => BinaryOperator::ShiftRight,
+        };
+
+        // Create a = a op b
+        let binary_expr = Expression::BinaryOperator {
+            operator: binary_operator,
+            left: Box::new(lvalue.clone()),
+            right: Box::new(value),
+        };
+
+        process_variable_assignment_ir(identifier.clone(), binary_expr, instructions)
+    } else {
+        unreachable!(
+            "Left-hand side of compound assignment must be a variable. This is a compiler bug."
+        )
+    }
+}
+
+// Prefix increment: ++a -> a = a + 1, returns new value
+fn process_prefix_increment_ir(expr: Expression, instructions: &mut Vec<InstructionIR>) -> ValueIR {
+    if let Expression::Variable(ref identifier) = expr {
+        // Create a = a + 1
+        let binary_expr = Expression::BinaryOperator {
+            operator: BinaryOperator::Addition,
+            left: Box::new(expr.clone()),
+            right: Box::new(Expression::Constant(1)),
+        };
+
+        process_variable_assignment_ir(identifier.clone(), binary_expr, instructions)
+    } else {
+        unreachable!("Operand of prefix increment must be a variable. This is a compiler bug.")
+    }
+}
+
+// Prefix decrement: --a -> a = a - 1, returns new value
+fn process_prefix_decrement_ir(expr: Expression, instructions: &mut Vec<InstructionIR>) -> ValueIR {
+    if let Expression::Variable(ref identifier) = expr {
+        // Create a = a - 1
+        let binary_expr = Expression::BinaryOperator {
+            operator: BinaryOperator::Subtraction,
+            left: Box::new(expr.clone()),
+            right: Box::new(Expression::Constant(1)),
+        };
+
+        process_variable_assignment_ir(identifier.clone(), binary_expr, instructions)
+    } else {
+        unreachable!("Operand of prefix decrement must be a variable. This is a compiler bug.")
+    }
+}
+
+// Postfix increment: a++ -> save old value, a = a + 1, return old value
+fn process_postfix_increment_ir(
+    expr: Expression,
+    instructions: &mut Vec<InstructionIR>,
+) -> ValueIR {
+    if let Expression::Variable(ref identifier) = expr {
+        // Save old value to temp variable
+        let old_value = ValueIR::VariableIR(identifier.clone());
+        let tmp_var_name = generate_tmp_var_name(Some("postfix_increment"));
+        let tmp_value = ValueIR::VariableIR(tmp_var_name);
+
+        instructions.push(InstructionIR::CopyIR {
+            src: old_value,
+            dst: tmp_value.clone(),
+        });
+
+        // Increment: a = a + 1
+        let binary_expr = Expression::BinaryOperator {
+            operator: BinaryOperator::Addition,
+            left: Box::new(expr.clone()),
+            right: Box::new(Expression::Constant(1)),
+        };
+        process_variable_assignment_ir(identifier.clone(), binary_expr, instructions);
+
+        // Return old value
+        tmp_value
+    } else {
+        unreachable!("Operand of postfix increment must be a variable. This is a compiler bug.")
+    }
+}
+
+// Postfix decrement: a-- -> save old value, a = a - 1, return old value
+fn process_postfix_decrement_ir(
+    expr: Expression,
+    instructions: &mut Vec<InstructionIR>,
+) -> ValueIR {
+    if let Expression::Variable(ref identifier) = expr {
+        // Save old value to temp variable
+        let old_value = ValueIR::VariableIR(identifier.clone());
+        let tmp_var_name = generate_tmp_var_name(Some("postfix_decrement"));
+        let tmp_value = ValueIR::VariableIR(tmp_var_name);
+
+        instructions.push(InstructionIR::CopyIR {
+            src: old_value,
+            dst: tmp_value.clone(),
+        });
+
+        // Decrement: a = a - 1
+        let binary_expr = Expression::BinaryOperator {
+            operator: BinaryOperator::Subtraction,
+            left: Box::new(expr.clone()),
+            right: Box::new(Expression::Constant(1)),
+        };
+        process_variable_assignment_ir(identifier.clone(), binary_expr, instructions);
+
+        // Return old value
+        tmp_value
+    } else {
+        unreachable!("Operand of postfix decrement must be a variable. This is a compiler bug.")
+    }
 }

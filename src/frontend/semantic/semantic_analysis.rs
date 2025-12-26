@@ -129,6 +129,71 @@ fn resolve_expression(
                 value: Box::new(resolve_expression(*value, symbol_table)?),
             })
         }
+        Expression::CompoundAssignment {
+            operator,
+            lvalue,
+            value,
+        } => {
+            if !matches!(*lvalue, Expression::Variable(_)) {
+                return Err(format!(
+                    "Left-hand side of compound assignment must be a variable. Got {:?}",
+                    lvalue
+                ));
+            }
+            Ok(Expression::CompoundAssignment {
+                operator,
+                lvalue: Box::new(resolve_expression(*lvalue, symbol_table)?),
+                value: Box::new(resolve_expression(*value, symbol_table)?),
+            })
+        }
+        Expression::PrefixIncrement(expr) => {
+            if !matches!(*expr, Expression::Variable(_)) {
+                return Err(format!(
+                    "Operand of prefix increment must be a variable. Got {:?}",
+                    expr
+                ));
+            }
+            Ok(Expression::PrefixIncrement(Box::new(resolve_expression(
+                *expr,
+                symbol_table,
+            )?)))
+        }
+        Expression::PrefixDecrement(expr) => {
+            if !matches!(*expr, Expression::Variable(_)) {
+                return Err(format!(
+                    "Operand of prefix decrement must be a variable. Got {:?}",
+                    expr
+                ));
+            }
+            Ok(Expression::PrefixDecrement(Box::new(resolve_expression(
+                *expr,
+                symbol_table,
+            )?)))
+        }
+        Expression::PostfixIncrement(expr) => {
+            if !matches!(*expr, Expression::Variable(_)) {
+                return Err(format!(
+                    "Operand of postfix increment must be a variable. Got {:?}",
+                    expr
+                ));
+            }
+            Ok(Expression::PostfixIncrement(Box::new(resolve_expression(
+                *expr,
+                symbol_table,
+            )?)))
+        }
+        Expression::PostfixDecrement(expr) => {
+            if !matches!(*expr, Expression::Variable(_)) {
+                return Err(format!(
+                    "Operand of postfix decrement must be a variable. Got {:?}",
+                    expr
+                ));
+            }
+            Ok(Expression::PostfixDecrement(Box::new(resolve_expression(
+                *expr,
+                symbol_table,
+            )?)))
+        }
     }
 }
 

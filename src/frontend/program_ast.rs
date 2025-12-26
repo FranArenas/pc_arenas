@@ -147,6 +147,15 @@ pub enum Expression {
         lvalue: Box<Expression>,
         value: Box<Expression>,
     },
+    CompoundAssignment {
+        operator: CompoundAssignmentOperator,
+        lvalue: Box<Expression>,
+        value: Box<Expression>,
+    },
+    PrefixIncrement(Box<Expression>),
+    PrefixDecrement(Box<Expression>),
+    PostfixIncrement(Box<Expression>),
+    PostfixDecrement(Box<Expression>),
     Constant(i64),
     UnaryOp(UnaryOperator, Box<Expression>),
 }
@@ -159,7 +168,7 @@ impl IndentedDisplay for Expression {
                 left,
                 right,
             } => {
-                writeln!(f, "{}└── BinaryOperator: {}", indent, operator)?; // todo: Check if this looks good
+                writeln!(f, "{}└── BinaryOperator: {}", indent, operator)?;
                 left.fmt_with_indent(f, &format!("{}    ", indent))?;
                 right.fmt_with_indent(f, &format!("{}    ", indent))
             }
@@ -167,6 +176,31 @@ impl IndentedDisplay for Expression {
                 writeln!(f, "{}└── Assignment", indent)?;
                 lvalue.fmt_with_indent(f, &format!("{}    ", indent))?;
                 value.fmt_with_indent(f, &format!("{}    ", indent))
+            }
+            Expression::CompoundAssignment {
+                operator,
+                lvalue,
+                value,
+            } => {
+                writeln!(f, "{}└── CompoundAssignment: {}", indent, operator)?;
+                lvalue.fmt_with_indent(f, &format!("{}    ", indent))?;
+                value.fmt_with_indent(f, &format!("{}    ", indent))
+            }
+            Expression::PrefixIncrement(expr) => {
+                writeln!(f, "{}└── PrefixIncrement (++)", indent)?;
+                expr.fmt_with_indent(f, &format!("{}    ", indent))
+            }
+            Expression::PrefixDecrement(expr) => {
+                writeln!(f, "{}└── PrefixDecrement (--)", indent)?;
+                expr.fmt_with_indent(f, &format!("{}    ", indent))
+            }
+            Expression::PostfixIncrement(expr) => {
+                writeln!(f, "{}└── PostfixIncrement (++)", indent)?;
+                expr.fmt_with_indent(f, &format!("{}    ", indent))
+            }
+            Expression::PostfixDecrement(expr) => {
+                writeln!(f, "{}└── PostfixDecrement (--)", indent)?;
+                expr.fmt_with_indent(f, &format!("{}    ", indent))
             }
             Expression::Variable(identifier) => {
                 writeln!(f, "{}└── Variable: {}", indent, identifier)
@@ -196,6 +230,48 @@ impl fmt::Display for UnaryOperator {
             UnaryOperator::BitwiseComplement => write!(f, "BitwiseComplement (~)"),
             UnaryOperator::Negation => write!(f, "Negation (-)"),
             UnaryOperator::LogicalNot => write!(f, "LogicalNot (!)"),
+        }
+    }
+}
+
+// CompoundAssignmentOperator
+#[derive(Debug, Clone)]
+pub enum CompoundAssignmentOperator {
+    AddAssignment,        // +=
+    SubtractAssignment,   // -=
+    MultiplyAssignment,   // *=
+    DivideAssignment,     // /=
+    ModulusAssignment,    // %=
+    BitwiseAndAssignment, // &=
+    BitwiseOrAssignment,  // |=
+    BitwiseXorAssignment, // ^=
+    ShiftLeftAssignment,  // <<=
+    ShiftRightAssignment, // >>=
+}
+
+impl fmt::Display for CompoundAssignmentOperator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CompoundAssignmentOperator::AddAssignment => write!(f, "AddAssignment (+=)"),
+            CompoundAssignmentOperator::SubtractAssignment => write!(f, "SubtractAssignment (-=)"),
+            CompoundAssignmentOperator::MultiplyAssignment => write!(f, "MultiplyAssignment (*=)"),
+            CompoundAssignmentOperator::DivideAssignment => write!(f, "DivideAssignment (/=)"),
+            CompoundAssignmentOperator::ModulusAssignment => write!(f, "ModulusAssignment (%=)"),
+            CompoundAssignmentOperator::BitwiseAndAssignment => {
+                write!(f, "BitwiseAndAssignment (&=)")
+            }
+            CompoundAssignmentOperator::BitwiseOrAssignment => {
+                write!(f, "BitwiseOrAssignment (|=)")
+            }
+            CompoundAssignmentOperator::BitwiseXorAssignment => {
+                write!(f, "BitwiseXorAssignment (^=)")
+            }
+            CompoundAssignmentOperator::ShiftLeftAssignment => {
+                write!(f, "ShiftLeftAssignment (<<=)")
+            }
+            CompoundAssignmentOperator::ShiftRightAssignment => {
+                write!(f, "ShiftRightAssignment (>>=)")
+            }
         }
     }
 }

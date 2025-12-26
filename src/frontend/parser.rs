@@ -3,8 +3,8 @@ use std::mem::discriminant;
 
 use crate::frontend::lexer::{Token, TokenType};
 use crate::frontend::program_ast::{
-    BinaryOperator, BlockItem, Declaration, Expression, FunctionDefinition, ProgramAst, Statement,
-    UnaryOperator,
+    BinaryOperator, BlockItem, CompoundAssignmentOperator, Declaration, Expression,
+    FunctionDefinition, ProgramAst, Statement, UnaryOperator,
 };
 
 #[derive(Debug, Clone)]
@@ -187,6 +187,17 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok(Expression::Constant(value))
             }
+            // Prefix increment/decrement
+            TokenType::Increment => {
+                self.advance();
+                let inner_expr = self.parse_factor()?;
+                Ok(Expression::PrefixIncrement(Box::new(inner_expr)))
+            }
+            TokenType::Decrement => {
+                self.advance();
+                let inner_expr = self.parse_factor()?;
+                Ok(Expression::PrefixDecrement(Box::new(inner_expr)))
+            }
             // Unary operators
             TokenType::Negation | TokenType::BitwiseComplement | TokenType::LogicalNot => {
                 let operator = self.parse_unary_operator()?;
@@ -200,12 +211,39 @@ impl<'a> Parser<'a> {
                 self.advance();
                 let inner_expr = self.parse_expression(0)?; // Minimum precedence is 0 because the expression is parenthesized
                 self.consume(TokenType::CloseParen, &format!("Expected closing parenthesis to match opened parenthesis at position {}:{}", line, column))?;
-                Ok(inner_expr)
+
+                // Check for postfix increment/decrement on parenthesized expressions
+                match self.current_token().token_type {
+                    TokenType::Increment => {
+                        self.advance();
+                        Ok(Expression::PostfixIncrement(Box::new(inner_expr)))
+                    }
+                    TokenType::Decrement => {
+                        self.advance();
+                        Ok(Expression::PostfixDecrement(Box::new(inner_expr)))
+                    }
+                    _ => Ok(inner_expr),
+                }
             }
             TokenType::Identifier(ref name) => {
                 let var_name = name.clone();
                 self.advance();
-                Ok(Expression::Variable(var_name))
+                // Check for postfix increment/decrement
+                match self.current_token().token_type {
+                    TokenType::Increment => {
+                        self.advance();
+                        Ok(Expression::PostfixIncrement(Box::new(
+                            Expression::Variable(var_name),
+                        )))
+                    }
+                    TokenType::Decrement => {
+                        self.advance();
+                        Ok(Expression::PostfixDecrement(Box::new(
+                            Expression::Variable(var_name),
+                        )))
+                    }
+                    _ => Ok(Expression::Variable(var_name)),
+                }
             }
             _ => {
                 let error = ParseError {
@@ -225,6 +263,7 @@ impl<'a> Parser<'a> {
         let mut left_expr = self.parse_factor()?;
         while self.current_token().token_type.is_binary_operator()
             || self.current_token().token_type == TokenType::Assignment
+            || self.is_compound_assignment(&self.current_token().token_type)
         {
             let precedence = self
                 .current_token()
@@ -242,6 +281,16 @@ impl<'a> Parser<'a> {
                     self.advance(); // Consume = as it was already checked
                     let right_expression = self.parse_expression(precedence)?; // Do not increase precedence for right associative operators
                     left_expr = Expression::Assignment {
+                        lvalue: Box::new(left_expr),
+                        value: Box::new(right_expression),
+                    }
+                }
+                _ if self.is_compound_assignment(&self.current_token().token_type) => {
+                    // Compound assignment operators are right associative
+                    let operator = self.parse_compound_assignment_operator()?;
+                    let right_expression = self.parse_expression(precedence)?;
+                    left_expr = Expression::CompoundAssignment {
+                        operator,
                         lvalue: Box::new(left_expr),
                         value: Box::new(right_expression),
                     }
@@ -311,6 +360,53 @@ impl<'a> Parser<'a> {
                     column: current.column,
                     message: format!(
                         "Expected a binary operator (+, -, *, /, % or bitwise operator), found {:?}",
+                        current.token_type
+                    ),
+                };
+                return Err(error);
+            }
+        };
+        self.advance();
+        Ok(operator)
+    }
+
+    fn is_compound_assignment(&self, token_type: &TokenType) -> bool {
+        matches!(
+            token_type,
+            TokenType::AddAssignment
+                | TokenType::SubtractAssignment
+                | TokenType::MultiplyAssignment
+                | TokenType::DivideAssignment
+                | TokenType::ModulusAssignment
+                | TokenType::BitwiseAndAssignment
+                | TokenType::BitwiseOrAssignment
+                | TokenType::BitwiseXorAssignment
+                | TokenType::ShiftLeftAssignment
+                | TokenType::ShiftRightAssignment
+        )
+    }
+
+    fn parse_compound_assignment_operator(
+        &mut self,
+    ) -> Result<CompoundAssignmentOperator, ParseError> {
+        let operator = match self.current_token().token_type {
+            TokenType::AddAssignment => CompoundAssignmentOperator::AddAssignment,
+            TokenType::SubtractAssignment => CompoundAssignmentOperator::SubtractAssignment,
+            TokenType::MultiplyAssignment => CompoundAssignmentOperator::MultiplyAssignment,
+            TokenType::DivideAssignment => CompoundAssignmentOperator::DivideAssignment,
+            TokenType::ModulusAssignment => CompoundAssignmentOperator::ModulusAssignment,
+            TokenType::BitwiseAndAssignment => CompoundAssignmentOperator::BitwiseAndAssignment,
+            TokenType::BitwiseOrAssignment => CompoundAssignmentOperator::BitwiseOrAssignment,
+            TokenType::BitwiseXorAssignment => CompoundAssignmentOperator::BitwiseXorAssignment,
+            TokenType::ShiftLeftAssignment => CompoundAssignmentOperator::ShiftLeftAssignment,
+            TokenType::ShiftRightAssignment => CompoundAssignmentOperator::ShiftRightAssignment,
+            _ => {
+                let current = self.current_token();
+                let error = ParseError {
+                    line: current.line,
+                    column: current.column,
+                    message: format!(
+                        "Expected a compound assignment operator (+=, -=, *=, etc.), found {:?}",
                         current.token_type
                     ),
                 };

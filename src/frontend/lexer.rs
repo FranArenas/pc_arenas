@@ -15,6 +15,22 @@ pub enum TokenType {
     // Assignment operator
     Assignment, // =
 
+    // Compound assignment operators
+    AddAssignment,        // +=
+    SubtractAssignment,   // -=
+    MultiplyAssignment,   // *=
+    DivideAssignment,     // /=
+    ModulusAssignment,    // %=
+    BitwiseAndAssignment, // &=
+    BitwiseOrAssignment,  // |=
+    BitwiseXorAssignment, // ^=
+    ShiftLeftAssignment,  // <<=
+    ShiftRightAssignment, // >>=
+
+    // Increment and decrement operators
+    Increment, // ++
+    Decrement, // --
+
     // Unary operators
     BitwiseComplement, // ~
     Negation,          // - Note: It can be unary or binary
@@ -106,8 +122,18 @@ impl TokenType {
             TokenType::LogicalAnd => Some(3),
             TokenType::LogicalOr => Some(2),
 
-            // Assignment has the lowest precedence
-            TokenType::Assignment => Some(1),
+            // Assignment and compound assignment have the lowest precedence
+            TokenType::Assignment
+            | TokenType::AddAssignment
+            | TokenType::SubtractAssignment
+            | TokenType::MultiplyAssignment
+            | TokenType::DivideAssignment
+            | TokenType::ModulusAssignment
+            | TokenType::BitwiseAndAssignment
+            | TokenType::BitwiseOrAssignment
+            | TokenType::BitwiseXorAssignment
+            | TokenType::ShiftLeftAssignment
+            | TokenType::ShiftRightAssignment => Some(1),
             _ => None,
         }
     }
@@ -286,14 +312,102 @@ pub fn tokenize(input: &str) -> (Vec<Token>, Vec<LexError>) {
                 lexer.row,
                 lexer.column,
             )),
-            '-' => tokens.push(Token::new(TokenType::Negation, lexer.row, lexer.column)),
+            '-' => {
+                match lexer.peek() {
+                    Some(&'-') => {
+                        lexer.next(); // Consume the second '-'
+                        tokens.push(Token::new(
+                            TokenType::Decrement,
+                            lexer.row,
+                            lexer.column - 1,
+                        ));
+                    }
+                    Some(&'=') => {
+                        lexer.next(); // Consume the '='
+                        tokens.push(Token::new(
+                            TokenType::SubtractAssignment,
+                            lexer.row,
+                            lexer.column - 1,
+                        ));
+                    }
+                    _ => tokens.push(Token::new(TokenType::Negation, lexer.row, lexer.column)),
+                }
+            }
             // Binary operators
-            '+' => tokens.push(Token::new(TokenType::Add, lexer.row, lexer.column)),
-            '*' => tokens.push(Token::new(TokenType::Multiply, lexer.row, lexer.column)),
-            '/' => tokens.push(Token::new(TokenType::Divide, lexer.row, lexer.column)),
-            '%' => tokens.push(Token::new(TokenType::Modulus, lexer.row, lexer.column)),
+            '+' => {
+                match lexer.peek() {
+                    Some(&'+') => {
+                        lexer.next(); // Consume the second '+'
+                        tokens.push(Token::new(
+                            TokenType::Increment,
+                            lexer.row,
+                            lexer.column - 1,
+                        ));
+                    }
+                    Some(&'=') => {
+                        lexer.next(); // Consume the '='
+                        tokens.push(Token::new(
+                            TokenType::AddAssignment,
+                            lexer.row,
+                            lexer.column - 1,
+                        ));
+                    }
+                    _ => tokens.push(Token::new(TokenType::Add, lexer.row, lexer.column)),
+                }
+            }
+            '*' => {
+                match lexer.peek() {
+                    Some(&'=') => {
+                        lexer.next(); // Consume the '='
+                        tokens.push(Token::new(
+                            TokenType::MultiplyAssignment,
+                            lexer.row,
+                            lexer.column - 1,
+                        ));
+                    }
+                    _ => tokens.push(Token::new(TokenType::Multiply, lexer.row, lexer.column)),
+                }
+            }
+            '/' => {
+                match lexer.peek() {
+                    Some(&'=') => {
+                        lexer.next(); // Consume the '='
+                        tokens.push(Token::new(
+                            TokenType::DivideAssignment,
+                            lexer.row,
+                            lexer.column - 1,
+                        ));
+                    }
+                    _ => tokens.push(Token::new(TokenType::Divide, lexer.row, lexer.column)),
+                }
+            }
+            '%' => {
+                match lexer.peek() {
+                    Some(&'=') => {
+                        lexer.next(); // Consume the '='
+                        tokens.push(Token::new(
+                            TokenType::ModulusAssignment,
+                            lexer.row,
+                            lexer.column - 1,
+                        ));
+                    }
+                    _ => tokens.push(Token::new(TokenType::Modulus, lexer.row, lexer.column)),
+                }
+            }
             // Bitwise operators
-            '^' => tokens.push(Token::new(TokenType::BitwiseXor, lexer.row, lexer.column)),
+            '^' => {
+                match lexer.peek() {
+                    Some(&'=') => {
+                        lexer.next(); // Consume the '='
+                        tokens.push(Token::new(
+                            TokenType::BitwiseXorAssignment,
+                            lexer.row,
+                            lexer.column - 1,
+                        ));
+                    }
+                    _ => tokens.push(Token::new(TokenType::BitwiseXor, lexer.row, lexer.column)),
+                }
+            }
             // Bitwise/Logical operators
             '&' => {
                 match lexer.peek() {
@@ -301,6 +415,14 @@ pub fn tokenize(input: &str) -> (Vec<Token>, Vec<LexError>) {
                         lexer.next(); // Consume the second '&'
                         tokens.push(Token::new(
                             TokenType::LogicalAnd,
+                            lexer.row,
+                            lexer.column - 1,
+                        ));
+                    }
+                    Some(&'=') => {
+                        lexer.next(); // Consume the '='
+                        tokens.push(Token::new(
+                            TokenType::BitwiseAndAssignment,
                             lexer.row,
                             lexer.column - 1,
                         ));
@@ -318,6 +440,14 @@ pub fn tokenize(input: &str) -> (Vec<Token>, Vec<LexError>) {
                             lexer.column - 1,
                         ));
                     }
+                    Some(&'=') => {
+                        lexer.next(); // Consume the '='
+                        tokens.push(Token::new(
+                            TokenType::BitwiseOrAssignment,
+                            lexer.row,
+                            lexer.column - 1,
+                        ));
+                    }
                     _ => tokens.push(Token::new(TokenType::BitwiseOr, lexer.row, lexer.column)),
                 }
             }
@@ -326,11 +456,24 @@ pub fn tokenize(input: &str) -> (Vec<Token>, Vec<LexError>) {
                 match lexer.peek() {
                     Some(&'<') => {
                         lexer.next(); // Consume the second '<'
-                        tokens.push(Token::new(
-                            TokenType::ShiftLeft,
-                            lexer.row,
-                            lexer.column - 1,
-                        ));
+                        // Check for <<=
+                        match lexer.peek() {
+                            Some(&'=') => {
+                                lexer.next(); // Consume the '='
+                                tokens.push(Token::new(
+                                    TokenType::ShiftLeftAssignment,
+                                    lexer.row,
+                                    lexer.column - 2,
+                                ));
+                            }
+                            _ => {
+                                tokens.push(Token::new(
+                                    TokenType::ShiftLeft,
+                                    lexer.row,
+                                    lexer.column - 1,
+                                ));
+                            }
+                        }
                     }
                     Some(&'=') => {
                         lexer.next(); // Consume the '='
@@ -347,11 +490,24 @@ pub fn tokenize(input: &str) -> (Vec<Token>, Vec<LexError>) {
                 match lexer.peek() {
                     Some(&'>') => {
                         lexer.next(); // Consume the second '>'
-                        tokens.push(Token::new(
-                            TokenType::ShiftRight,
-                            lexer.row,
-                            lexer.column - 1,
-                        ));
+                        // Check for >>=
+                        match lexer.peek() {
+                            Some(&'=') => {
+                                lexer.next(); // Consume the '='
+                                tokens.push(Token::new(
+                                    TokenType::ShiftRightAssignment,
+                                    lexer.row,
+                                    lexer.column - 2,
+                                ));
+                            }
+                            _ => {
+                                tokens.push(Token::new(
+                                    TokenType::ShiftRight,
+                                    lexer.row,
+                                    lexer.column - 1,
+                                ));
+                            }
+                        }
                     }
                     Some(&'=') => {
                         lexer.next(); // Consume the '='
