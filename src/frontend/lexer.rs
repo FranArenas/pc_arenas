@@ -68,6 +68,12 @@ pub enum TokenType {
     CloseBrace,
     Semicolon,
 
+    // Control flow
+    IfKeyword,
+    ElseKeyword,
+    QuestionMark,
+    Colon,
+
     // End of file
     EndOfFile,
 }
@@ -98,29 +104,47 @@ impl TokenType {
         )
     }
 
+    pub fn is_compound_assignment(&self) -> bool {
+        matches!(
+            self,
+            TokenType::AddAssignment
+                | TokenType::SubtractAssignment
+                | TokenType::MultiplyAssignment
+                | TokenType::DivideAssignment
+                | TokenType::ModulusAssignment
+                | TokenType::BitwiseAndAssignment
+                | TokenType::BitwiseOrAssignment
+                | TokenType::BitwiseXorAssignment
+                | TokenType::ShiftLeftAssignment
+                | TokenType::ShiftRightAssignment
+        )
+    }
+
     pub fn get_precedence(&self) -> Option<u8> {
         match self {
-            TokenType::Multiply | TokenType::Divide | TokenType::Modulus => Some(11),
-            TokenType::Add | TokenType::Negation => Some(10),
-            TokenType::ShiftLeft | TokenType::ShiftRight => Some(9),
+            TokenType::Multiply | TokenType::Divide | TokenType::Modulus => Some(12),
+            TokenType::Add | TokenType::Negation => Some(11),
+            TokenType::ShiftLeft | TokenType::ShiftRight => Some(10),
 
             // Relational (higher than bitwise ops)
             TokenType::GreaterThan
             | TokenType::LessThan
             | TokenType::GreaterThanOrEqual
-            | TokenType::LessThanOrEqual => Some(8),
+            | TokenType::LessThanOrEqual => Some(9),
 
             // Equality
-            TokenType::Equal | TokenType::NotEqual => Some(7),
+            TokenType::Equal | TokenType::NotEqual => Some(8),
 
             // Bitwise
-            TokenType::BitwiseAnd => Some(6),
-            TokenType::BitwiseXor => Some(5),
-            TokenType::BitwiseOr => Some(4),
+            TokenType::BitwiseAnd => Some(7),
+            TokenType::BitwiseXor => Some(6),
+            TokenType::BitwiseOr => Some(5),
 
             // Logical
-            TokenType::LogicalAnd => Some(3),
-            TokenType::LogicalOr => Some(2),
+            TokenType::LogicalAnd => Some(4),
+            TokenType::LogicalOr => Some(3),
+            // Ternary conditional operator
+            TokenType::QuestionMark => Some(2),
 
             // Assignment and compound assignment have the lowest precedence
             TokenType::Assignment
@@ -256,6 +280,10 @@ pub fn tokenize(input: &str) -> (Vec<Token>, Vec<LexError>) {
                         lexer.row,
                         start_column,
                     )),
+                    "if" => tokens.push(Token::new(TokenType::IfKeyword, lexer.row, start_column)),
+                    "else" => {
+                        tokens.push(Token::new(TokenType::ElseKeyword, lexer.row, start_column))
+                    }
                     _ => tokens.push(Token::new(
                         TokenType::Identifier(identifier),
                         lexer.row,
@@ -529,6 +557,9 @@ pub fn tokenize(input: &str) -> (Vec<Token>, Vec<LexError>) {
                     _ => tokens.push(Token::new(TokenType::LogicalNot, lexer.row, lexer.column)),
                 }
             }
+            // Control flow
+            '?' => tokens.push(Token::new(TokenType::QuestionMark, lexer.row, lexer.column)),
+            ':' => tokens.push(Token::new(TokenType::Colon, lexer.row, lexer.column)),
             // Others
             '(' => tokens.push(Token::new(TokenType::OpenParen, lexer.row, lexer.column)),
             ')' => tokens.push(Token::new(TokenType::CloseParen, lexer.row, lexer.column)),

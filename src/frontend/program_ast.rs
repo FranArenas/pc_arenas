@@ -112,6 +112,11 @@ impl IndentedDisplay for Declaration {
 #[derive(Debug, Clone)]
 pub enum Statement {
     Return(Expression),
+    If {
+        condition: Expression,
+        then_branch: Box<Statement>,
+        else_branch: Option<Box<Statement>>,
+    },
     Expression(Expression), // Used for expression statements, used usually for side effects
     Null,
 }
@@ -126,6 +131,22 @@ impl IndentedDisplay for Statement {
             Statement::Expression(expr) => {
                 writeln!(f, "{}└── Expression", indent)?;
                 expr.fmt_with_indent(f, &format!("{}    ", indent))
+            }
+            Statement::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                writeln!(f, "{}└── If", indent)?;
+                writeln!(f, "{}    └── Condition", indent)?;
+                condition.fmt_with_indent(f, &format!("{}        ", indent))?;
+                writeln!(f, "{}    └── ThenBranch", indent)?;
+                then_branch.fmt_with_indent(f, &format!("{}        ", indent))?;
+                if let Some(else_branch) = else_branch {
+                    writeln!(f, "{}    └── ElseBranch", indent)?;
+                    else_branch.fmt_with_indent(f, &format!("{}        ", indent))?;
+                }
+                Ok(())
             }
             Statement::Null => {
                 writeln!(f, "{}└── Null", indent)
@@ -158,6 +179,11 @@ pub enum Expression {
     PostfixDecrement(Box<Expression>),
     Constant(i64),
     UnaryOp(UnaryOperator, Box<Expression>),
+    Conditional {
+        condition: Box<Expression>,
+        then_expr: Box<Expression>,
+        else_expr: Box<Expression>,
+    },
 }
 
 impl IndentedDisplay for Expression {
@@ -211,6 +237,19 @@ impl IndentedDisplay for Expression {
             Expression::UnaryOp(operator, inner_expr) => {
                 writeln!(f, "{}└── UnaryOp: {}", indent, operator)?;
                 inner_expr.fmt_with_indent(f, &format!("{}    ", indent))
+            }
+            Expression::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                writeln!(f, "{}└── Conditional", indent)?;
+                writeln!(f, "{}    └── Condition", indent)?;
+                condition.fmt_with_indent(f, &format!("{}        ", indent))?;
+                writeln!(f, "{}    └── ThenExpression", indent)?;
+                then_expr.fmt_with_indent(f, &format!("{}        ", indent))?;
+                writeln!(f, "{}    └── ElseExpression", indent)?;
+                else_expr.fmt_with_indent(f, &format!("{}        ", indent))
             }
         }
     }

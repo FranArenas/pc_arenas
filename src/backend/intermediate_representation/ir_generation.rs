@@ -6,6 +6,7 @@ use crate::frontend::program_ast::{
     FunctionDefinition, ProgramAst, Statement, UnaryOperator,
 };
 use crate::utils::tmp_var_counter::TMP_VAR_COUNT;
+use std::os::unix::process;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static LABEL_MANGLE_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -75,8 +76,51 @@ fn process_statement_ir(stmt: Statement, instructions: &mut Vec<InstructionIR>) 
             Some(return_value)
         }
         Statement::Expression(expr) => Some(process_expression_ir(expr, instructions)),
+        Statement::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            process_if_ir(condition, then_branch, else_branch, instructions);
+            None
+        }
         Statement::Null => None,
     }
+}
+
+fn process_if_ir(
+    condition: Expression,
+    then_branch: Box<Statement>,
+    else_branch: Option<Box<Statement>>,
+    instructions: &mut Vec<InstructionIR>,
+) {
+    let else_label = add_suffix_to_label_name("if_else");
+    let end_label = add_suffix_to_label_name("if_end");
+
+    let condition_value = process_expression_ir(condition, instructions);
+    instructions.push(InstructionIR::JumpIfZeroIR {
+        condition: condition_value,
+        label_identifier: else_label.clone(),
+    });
+
+    // Then branch
+    process_statement_ir(*then_branch, instructions);
+    instructions.push(InstructionIR::JumpIR {
+        label_identifier: end_label.clone(),
+    });
+
+    // Else branch
+    instructions.push(InstructionIR::LabelIR {
+        identifier: else_label,
+    });
+    if let Some(else_stmt) = else_branch {
+        process_statement_ir(*else_stmt, instructions);
+    }
+
+    // End label
+    instructions.push(InstructionIR::LabelIR {
+        identifier: end_label,
+    });
 }
 
 fn process_declaration_ir(
@@ -127,6 +171,11 @@ fn process_expression_ir(expression: Expression, instructions: &mut Vec<Instruct
         Expression::PrefixDecrement(expr) => process_prefix_decrement_ir(*expr, instructions),
         Expression::PostfixIncrement(expr) => process_postfix_increment_ir(*expr, instructions),
         Expression::PostfixDecrement(expr) => process_postfix_decrement_ir(*expr, instructions),
+        Expression::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => process_conditional_ir(*condition, *then_expr, *else_expr, instructions),
     }
 }
 
@@ -447,4 +496,47 @@ fn process_postfix_decrement_ir(
     } else {
         unreachable!("Operand of postfix decrement must be a variable. This is a compiler bug.")
     }
+}
+
+fn process_conditional_ir(
+    condition: Expression,
+    then_expr: Expression,
+    else_expr: Expression,
+    instructions: &mut Vec<InstructionIR>,
+) -> ValueIR {
+    let else_label = add_suffix_to_label_name("conditional_else");
+    let end_label = add_suffix_to_label_name("conditional_end");
+    let result_value = ValueIR::VariableIR(generate_tmp_var_name(Some("conditional_result")));
+
+    let condition_value = process_expression_ir(condition, instructions);
+    instructions.push(InstructionIR::JumpIfZeroIR {
+        condition: condition_value,
+        label_identifier: else_label.clone(),
+    });
+
+    // Then expression
+    let then_value = process_expression_ir(then_expr, instructions);
+    instructions.push(InstructionIR::CopyIR {
+        src: then_value,
+        dst: result_value.clone(),
+    });
+    instructions.push(InstructionIR::JumpIR {
+        label_identifier: end_label.clone(),
+    });
+
+    // Else expression
+    instructions.push(InstructionIR::LabelIR {
+        identifier: else_label,
+    });
+    let else_value = process_expression_ir(else_expr, instructions);
+    instructions.push(InstructionIR::CopyIR {
+        src: else_value,
+        dst: result_value.clone(),
+    });
+
+    // End label
+    instructions.push(InstructionIR::LabelIR {
+        identifier: end_label,
+    });
+    result_value
 }

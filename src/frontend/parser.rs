@@ -161,6 +161,27 @@ impl<'a> Parser<'a> {
                 self.advance();
                 return Ok(Statement::Null);
             }
+            TokenType::IfKeyword => {
+                self.advance(); // Consume 'if'
+                self.consume(TokenType::OpenParen, "Expected '(' after 'if'")?;
+                let condition = self.parse_expression(0)?; // Minimum precedence is 0
+                self.consume(TokenType::CloseParen, "Expected ')' after if condition")?;
+
+                let then_branch = Box::new(self.parse_statement()?);
+
+                let else_branch = if self.current_token().token_type == TokenType::ElseKeyword {
+                    self.advance(); // Consume 'else'
+                    Some(Box::new(self.parse_statement()?))
+                } else {
+                    None
+                };
+
+                return Ok(Statement::If {
+                    condition,
+                    then_branch,
+                    else_branch,
+                });
+            }
             _ => {
                 // Parse expressions statement. Only used for expressions with side effects
                 let expr = self.parse_expression(0)?; // Minimum precedence is 0
@@ -182,27 +203,27 @@ impl<'a> Parser<'a> {
 
     fn parse_factor(&mut self) -> Result<Expression, ParseError> {
         let peeked_token = self.current_token();
-        match peeked_token.token_type {
+        let mut expr = match peeked_token.token_type {
             TokenType::IntLiteral(value) => {
                 self.advance();
-                Ok(Expression::Constant(value))
+                Expression::Constant(value)
             }
             // Prefix increment/decrement
             TokenType::Increment => {
                 self.advance();
                 let inner_expr = self.parse_factor()?;
-                Ok(Expression::PrefixIncrement(Box::new(inner_expr)))
+                Expression::PrefixIncrement(Box::new(inner_expr))
             }
             TokenType::Decrement => {
                 self.advance();
                 let inner_expr = self.parse_factor()?;
-                Ok(Expression::PrefixDecrement(Box::new(inner_expr)))
+                Expression::PrefixDecrement(Box::new(inner_expr))
             }
             // Unary operators
             TokenType::Negation | TokenType::BitwiseComplement | TokenType::LogicalNot => {
                 let operator = self.parse_unary_operator()?;
                 let inner_factor = self.parse_factor()?;
-                Ok(Expression::UnaryOp(operator, Box::new(inner_factor)))
+                Expression::UnaryOp(operator, Box::new(inner_factor))
             }
             // Parentheses
             TokenType::OpenParen => {
@@ -211,39 +232,12 @@ impl<'a> Parser<'a> {
                 self.advance();
                 let inner_expr = self.parse_expression(0)?; // Minimum precedence is 0 because the expression is parenthesized
                 self.consume(TokenType::CloseParen, &format!("Expected closing parenthesis to match opened parenthesis at position {}:{}", line, column))?;
-
-                // Check for postfix increment/decrement on parenthesized expressions
-                match self.current_token().token_type {
-                    TokenType::Increment => {
-                        self.advance();
-                        Ok(Expression::PostfixIncrement(Box::new(inner_expr)))
-                    }
-                    TokenType::Decrement => {
-                        self.advance();
-                        Ok(Expression::PostfixDecrement(Box::new(inner_expr)))
-                    }
-                    _ => Ok(inner_expr),
-                }
+                inner_expr
             }
             TokenType::Identifier(ref name) => {
                 let var_name = name.clone();
                 self.advance();
-                // Check for postfix increment/decrement
-                match self.current_token().token_type {
-                    TokenType::Increment => {
-                        self.advance();
-                        Ok(Expression::PostfixIncrement(Box::new(
-                            Expression::Variable(var_name),
-                        )))
-                    }
-                    TokenType::Decrement => {
-                        self.advance();
-                        Ok(Expression::PostfixDecrement(Box::new(
-                            Expression::Variable(var_name),
-                        )))
-                    }
-                    _ => Ok(Expression::Variable(var_name)),
-                }
+                Expression::Variable(var_name)
             }
             _ => {
                 let error = ParseError {
@@ -254,55 +248,93 @@ impl<'a> Parser<'a> {
                         peeked_token.token_type
                     ),
                 };
-                Err(error)
+                return Err(error);
+            }
+        };
+
+        // Postfix Operators are special as they can be chained
+        // In the case of ++-- is invalid semantically but not syntactically. It will be handled in semantic analysis as invalid.
+        loop {
+            //todo: Implement this in the semantic analysis phase todo: variable resolution chapter 6
+            match self.current_token().token_type {
+                TokenType::Increment => {
+                    self.advance();
+                    expr = Expression::PostfixIncrement(Box::new(expr));
+                }
+                TokenType::Decrement => {
+                    self.advance();
+                    expr = Expression::PostfixDecrement(Box::new(expr));
+                }
+                _ => break,
             }
         }
+
+        Ok(expr)
     }
     // To parse the expression precedence climbing is used to handle precedence and associativity
     fn parse_expression(&mut self, minimum_precedence: u8) -> Result<Expression, ParseError> {
         let mut left_expr = self.parse_factor()?;
         while self.current_token().token_type.is_binary_operator()
             || self.current_token().token_type == TokenType::Assignment
-            || self.is_compound_assignment(&self.current_token().token_type)
+            || self.current_token().token_type.is_compound_assignment()
+            || self.current_token().token_type == TokenType::QuestionMark
+        // Ternary conditional operator
         {
             let precedence = self
                 .current_token()
                 .token_type
                 .get_precedence()
-                .expect("Expected a binary operator or assignment here");
+                .expect("Expected a binary operator, assignment, compound assignment or ternary conditional operator here");
 
             if precedence < minimum_precedence {
                 break;
             }
 
-            match self.current_token().token_type {
-                TokenType::Assignment => {
-                    // Assignment operator is right associative
-                    self.advance(); // Consume = as it was already checked
-                    let right_expression = self.parse_expression(precedence)?; // Do not increase precedence for right associative operators
-                    left_expr = Expression::Assignment {
-                        lvalue: Box::new(left_expr),
-                        value: Box::new(right_expression),
-                    }
+            if self.current_token().token_type.is_compound_assignment() {
+                // Compound assignment operators are right associative
+                let operator = self.parse_compound_assignment_operator()?;
+                let right_expression = self.parse_expression(precedence)?;
+                left_expr = Expression::CompoundAssignment {
+                    operator,
+                    lvalue: Box::new(left_expr),
+                    value: Box::new(right_expression),
                 }
-                _ if self.is_compound_assignment(&self.current_token().token_type) => {
-                    // Compound assignment operators are right associative
-                    let operator = self.parse_compound_assignment_operator()?;
-                    let right_expression = self.parse_expression(precedence)?;
-                    left_expr = Expression::CompoundAssignment {
-                        operator,
-                        lvalue: Box::new(left_expr),
-                        value: Box::new(right_expression),
+            } else {
+                match self.current_token().token_type {
+                    TokenType::Assignment => {
+                        // Assignment operator is right associative and a special case
+                        self.advance(); // Consume = as it was already checked
+                        let right_expression = self.parse_expression(precedence)?; // Do not increase precedence for right associative operators
+                        left_expr = Expression::Assignment {
+                            lvalue: Box::new(left_expr),
+                            value: Box::new(right_expression),
+                        }
                     }
-                }
-                _ => {
-                    // All other operators are left associative
-                    let operator = self.parse_binary_operator()?;
-                    let right_expression = self.parse_expression(precedence + 1)?; // Increase for left associative
-                    left_expr = Expression::BinaryOperator {
-                        operator,
-                        left: Box::new(left_expr),
-                        right: Box::new(right_expression),
+                    TokenType::QuestionMark => {
+                        // Ternary conditional operator is right associative and a special case
+                        // We treat it as a sub-expression with its own parsing, the left expression is parsed with 0 and then the else expression is parsed
+                        self.advance(); // Consume ?
+                        let then_expression = self.parse_expression(0)?; // Minimum precedence for then expression
+                        self.consume(
+                            TokenType::Colon,
+                            "Expected ':' in conditional (ternary) operator",
+                        )?;
+                        let right_else_expression = self.parse_expression(precedence)?; // Do not increase precedence for right associative operators
+                        left_expr = Expression::Conditional {
+                            condition: Box::new(left_expr),
+                            then_expr: Box::new(then_expression),
+                            else_expr: Box::new(right_else_expression),
+                        }
+                    }
+                    _ => {
+                        // All other operators are left associative (binary operators)
+                        let operator = self.parse_binary_operator()?;
+                        let right_expression = self.parse_expression(precedence + 1)?; // Increase for left associative
+                        left_expr = Expression::BinaryOperator {
+                            operator,
+                            left: Box::new(left_expr),
+                            right: Box::new(right_expression),
+                        }
                     }
                 }
             };
@@ -368,22 +400,6 @@ impl<'a> Parser<'a> {
         };
         self.advance();
         Ok(operator)
-    }
-
-    fn is_compound_assignment(&self, token_type: &TokenType) -> bool {
-        matches!(
-            token_type,
-            TokenType::AddAssignment
-                | TokenType::SubtractAssignment
-                | TokenType::MultiplyAssignment
-                | TokenType::DivideAssignment
-                | TokenType::ModulusAssignment
-                | TokenType::BitwiseAndAssignment
-                | TokenType::BitwiseOrAssignment
-                | TokenType::BitwiseXorAssignment
-                | TokenType::ShiftLeftAssignment
-                | TokenType::ShiftRightAssignment
-        )
     }
 
     fn parse_compound_assignment_operator(

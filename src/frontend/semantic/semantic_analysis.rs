@@ -91,6 +91,17 @@ fn resolve_statement(stmt: Statement, symbol_table: &mut SymbolTable) -> Result<
             symbol_table,
         )?)),
         Statement::Null => Ok(Statement::Null),
+        Statement::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => Ok(Statement::If {
+            condition: resolve_expression(condition, symbol_table)?,
+            then_branch: Box::new(resolve_statement(*then_branch, symbol_table)?),
+            else_branch: else_branch
+                .map(|else_stmt| resolve_statement(*else_stmt, symbol_table).map(Box::new))
+                .transpose()?,
+        }),
     }
 }
 
@@ -129,6 +140,15 @@ fn resolve_expression(
                 value: Box::new(resolve_expression(*value, symbol_table)?),
             })
         }
+        Expression::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => Ok(Expression::Conditional {
+            condition: Box::new(resolve_expression(*condition, symbol_table)?),
+            then_expr: Box::new(resolve_expression(*then_expr, symbol_table)?),
+            else_expr: Box::new(resolve_expression(*else_expr, symbol_table)?),
+        }),
         Expression::CompoundAssignment {
             operator,
             lvalue,
