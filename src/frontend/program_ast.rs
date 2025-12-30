@@ -38,10 +38,7 @@ impl fmt::Display for ProgramAst {
 // FunctionDefinition
 #[derive(Debug, Clone)]
 pub enum FunctionDefinition {
-    Function {
-        identifier: String,
-        body: Vec<BlockItem>,
-    },
+    Function { identifier: String, body: Block },
 }
 
 impl IndentedDisplay for FunctionDefinition {
@@ -49,13 +46,25 @@ impl IndentedDisplay for FunctionDefinition {
         match self {
             FunctionDefinition::Function { identifier, body } => {
                 writeln!(f, "{}└── Function: {}", indent, identifier)?;
-                writeln!(f, "{}    └── Body", indent)?;
-                for item in body {
-                    item.fmt_with_indent(f, &format!("{}        ", indent))?;
-                }
-                Ok(())
+                body.fmt_with_indent(f, &format!("{}    ", indent))
             }
         }
+    }
+}
+
+// Block. A block is a subset of code with an associated scope
+#[derive(Debug, Clone)]
+pub struct Block {
+    pub items: Vec<BlockItem>,
+}
+
+impl IndentedDisplay for Block {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, indent: &str) -> fmt::Result {
+        writeln!(f, "{}└── Block", indent)?;
+        for item in &self.items {
+            item.fmt_with_indent(f, &format!("{}    ", indent))?;
+        }
+        Ok(())
     }
 }
 
@@ -118,6 +127,7 @@ pub enum Statement {
         else_branch: Option<Box<Statement>>,
     },
     Expression(Expression), // Used for expression statements, used usually for side effects
+    CompoundStatement(Block),
     Null,
 }
 
@@ -147,6 +157,10 @@ impl IndentedDisplay for Statement {
                     else_branch.fmt_with_indent(f, &format!("{}        ", indent))?;
                 }
                 Ok(())
+            }
+            Statement::CompoundStatement(block) => {
+                writeln!(f, "{}└── CompoundStatement", indent)?;
+                block.fmt_with_indent(f, &format!("{}    ", indent))
             }
             Statement::Null => {
                 writeln!(f, "{}└── Null", indent)

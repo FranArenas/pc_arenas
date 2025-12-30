@@ -1,4 +1,4 @@
-use crate::frontend::program_ast::{BlockItem, Declaration, ProgramAst};
+use crate::frontend::program_ast::{Block, BlockItem, Declaration, ProgramAst};
 use crate::frontend::semantic::symbol_table::SymbolTable;
 use crate::{Expression, FunctionDefinition, Statement};
 
@@ -17,19 +17,40 @@ fn resolve_variables(
     ast: ProgramAst,
     symbol_table: &mut SymbolTable,
 ) -> Result<ProgramAst, String> {
-    match ast {
-        ProgramAst::Program(FunctionDefinition::Function { identifier, body }) => {
-            let updated_body = body
-                .into_iter()
-                .map(|block| resolve_block_item(block, symbol_table))
-                .collect::<Result<Vec<_>, _>>()?;
+    let ProgramAst::Program(function) = ast;
+    Ok(ProgramAst::Program(resolve_function(
+        function,
+        symbol_table,
+    )?))
+}
 
-            Ok(ProgramAst::Program(FunctionDefinition::Function {
-                identifier,
-                body: updated_body,
-            }))
-        }
+fn resolve_function(
+    func: FunctionDefinition,
+    symbol_table: &mut SymbolTable,
+) -> Result<FunctionDefinition, String> {
+    let FunctionDefinition::Function { identifier, body } = func;
+    Ok(FunctionDefinition::Function {
+        identifier,
+        body: resolve_block(body, symbol_table)?,
+    })
+}
+
+fn resolve_block(
+    block: crate::frontend::program_ast::Block,
+    symbol_table: &mut SymbolTable,
+) -> Result<crate::frontend::program_ast::Block, String> {
+    let mut resolved_items = Vec::new();
+    symbol_table.enter_scope();
+
+    for item in block.items {
+        resolved_items.push(resolve_block_item(item, symbol_table)?);
     }
+
+    symbol_table.exit_scope();
+
+    Ok(Block {
+        items: resolved_items,
+    })
 }
 
 fn resolve_block_item(
@@ -56,7 +77,7 @@ fn resolve_declaration(
             identifier,
             initial_value,
         } => {
-            if symbol_table.contains(&identifier) {
+            if symbol_table.is_in_current_scope(&identifier) {
                 return Err(format!(
                     "Variable '{}' already declared in this scope",
                     identifier
@@ -102,6 +123,10 @@ fn resolve_statement(stmt: Statement, symbol_table: &mut SymbolTable) -> Result<
                 .map(|else_stmt| resolve_statement(*else_stmt, symbol_table).map(Box::new))
                 .transpose()?,
         }),
+        Statement::CompoundStatement(block) => Ok(Statement::CompoundStatement(resolve_block(
+            block,
+            symbol_table,
+        )?)),
     }
 }
 

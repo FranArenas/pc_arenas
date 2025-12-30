@@ -6,7 +6,6 @@ use crate::frontend::program_ast::{
     FunctionDefinition, ProgramAst, Statement, UnaryOperator,
 };
 use crate::utils::tmp_var_counter::TMP_VAR_COUNT;
-use std::os::unix::process;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static LABEL_MANGLE_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -43,16 +42,7 @@ fn process_function_definition_ir(func: FunctionDefinition) -> FunctionDefinitio
     match func {
         FunctionDefinition::Function { identifier, body } => {
             let mut instructions = Vec::new(); // Vector that will be filled with IR instructions
-            for item in body {
-                match item {
-                    BlockItem::Statement(stmt) => {
-                        process_statement_ir(stmt, &mut instructions);
-                    }
-                    BlockItem::Declaration(decl) => {
-                        process_declaration_ir(decl, &mut instructions);
-                    }
-                }
-            }
+            process_block_ir(body, &mut instructions);
             // Ensure function ends with a return instruction. This return will be eliminated later if there is already a return instruction at the end of the function. This is done because the C standard doesn't define the behavior of reaching the end of a non-void function without a return statement. This is undefined behavior, and adding the return 0 simplifies the compiler implementation. Reference: Section 5.1.2.2.3 and Section 6.9.1, paragraph 12
             instructions.push(InstructionIR::ReturnIR {
                 value: ValueIR::ConstantIR(0),
@@ -84,7 +74,27 @@ fn process_statement_ir(stmt: Statement, instructions: &mut Vec<InstructionIR>) 
             process_if_ir(condition, then_branch, else_branch, instructions);
             None
         }
+        Statement::CompoundStatement(block) => {
+            process_block_ir(block, instructions);
+            None
+        }
         Statement::Null => None,
+    }
+}
+
+fn process_block_ir(
+    block: crate::frontend::program_ast::Block,
+    instructions: &mut Vec<InstructionIR>,
+) {
+    for item in block.items {
+        match item {
+            BlockItem::Declaration(decl) => {
+                process_declaration_ir(decl, instructions);
+            }
+            BlockItem::Statement(stmt) => {
+                process_statement_ir(stmt, instructions);
+            }
+        }
     }
 }
 

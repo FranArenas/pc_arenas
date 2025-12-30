@@ -3,7 +3,7 @@ use std::mem::discriminant;
 
 use crate::frontend::lexer::{Token, TokenType};
 use crate::frontend::program_ast::{
-    BinaryOperator, BlockItem, CompoundAssignmentOperator, Declaration, Expression,
+    BinaryOperator, Block, BlockItem, CompoundAssignmentOperator, Declaration, Expression,
     FunctionDefinition, ProgramAst, Statement, UnaryOperator,
 };
 
@@ -76,10 +76,16 @@ impl<'a> Parser<'a> {
         self.consume(TokenType::OpenParen, "Expected opened parenthesis")?;
         self.consume(TokenType::VoidKeyword, "Expected void keyword")?;
         self.consume(TokenType::CloseParen, "Expected closed parenthesis")?;
-        self.consume(TokenType::OpenBrace, "Expected opened brace")?;
 
-        // Parse function body
+        Ok(FunctionDefinition::Function {
+            identifier: name,
+            body: self.parse_block()?,
+        })
+    }
+
+    fn parse_block(&mut self) -> Result<Block, ParseError> {
         let mut body = Vec::new();
+        self.consume(TokenType::OpenBrace, "Expected opened brace")?;
 
         while self.current_token().token_type != TokenType::CloseBrace
             && self.current_token().token_type != TokenType::EndOfFile
@@ -96,11 +102,7 @@ impl<'a> Parser<'a> {
         }
 
         self.consume(TokenType::CloseBrace, "Expected closed brace")?;
-
-        Ok(FunctionDefinition::Function {
-            identifier: name.clone(),
-            body: body,
-        })
+        Ok(Block { items: body })
     }
 
     fn parse_block_item(&mut self) -> Result<BlockItem, ParseError> {
@@ -182,12 +184,18 @@ impl<'a> Parser<'a> {
                     else_branch,
                 });
             }
+            TokenType::OpenBrace => {
+                return Ok(Statement::CompoundStatement(self.parse_block()?));
+            }
             _ => {
                 // Parse expressions statement. Only used for expressions with side effects
                 let expr = self.parse_expression(0)?; // Minimum precedence is 0
                 self.consume(
                     TokenType::Semicolon,
-                    "Expected semicolon after expression statement",
+                    &format!(
+                        "Expected semicolon after expression statement. Got: {:?}",
+                        self.current_token().token_type
+                    ),
                 )?;
                 return Ok(Statement::Expression(expr));
             }
