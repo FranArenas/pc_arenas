@@ -128,6 +128,29 @@ pub enum Statement {
     },
     Expression(Expression), // Used for expression statements, used usually for side effects
     CompoundStatement(Block),
+    Break {
+        label: Option<String>, // The label is optional because it is set in the semantic analysis phase but we initialize it in the parsing phase
+    },
+    Continue {
+        label: Option<String>, // The label is optional because it is set in the semantic analysis phase but we initialize it in the parsing phase
+    },
+    DoWhile {
+        body: Box<Statement>,
+        condition: Expression,
+        label: Option<String>, // The label is optional because it is set in the semantic analysis phase but we initialize it in the parsing phase
+    },
+    While {
+        condition: Expression,
+        body: Box<Statement>,
+        label: Option<String>, // The label is optional because it is set in the semantic analysis phase but we initialize it in the parsing phase
+    },
+    For {
+        initialization: Option<ForInitialization>,
+        condition: Option<Expression>,
+        post: Option<Expression>,
+        body: Box<Statement>,
+        label: Option<String>, // The label is optional because it is set in the semantic analysis phase but we initialize it in the parsing phase
+    },
     Null,
 }
 
@@ -161,6 +184,76 @@ impl IndentedDisplay for Statement {
             Statement::CompoundStatement(block) => {
                 writeln!(f, "{}└── CompoundStatement", indent)?;
                 block.fmt_with_indent(f, &format!("{}    ", indent))
+            }
+            Statement::DoWhile {
+                body,
+                condition,
+                label,
+            } => {
+                writeln!(f, "{}└── DoWhile", indent)?;
+                writeln!(f, "{}    └── Body", indent)?;
+                body.fmt_with_indent(f, &format!("{}        ", indent))?;
+                writeln!(f, "{}    └── Condition", indent)?;
+                condition.fmt_with_indent(f, &format!("{}        ", indent))?;
+                if let Some(label) = label {
+                    writeln!(f, "{}    └── Label: {}", indent, label)?;
+                }
+                Ok(())
+            }
+            Statement::While {
+                condition,
+                body,
+                label,
+            } => {
+                writeln!(f, "{}└── While", indent)?;
+                writeln!(f, "{}    └── Condition", indent)?;
+                condition.fmt_with_indent(f, &format!("{}        ", indent))?;
+                writeln!(f, "{}    └── Body", indent)?;
+                body.fmt_with_indent(f, &format!("{}        ", indent))?;
+                if let Some(label) = label {
+                    writeln!(f, "{}    └── Label: {}", indent, label)?;
+                }
+                Ok(())
+            }
+            Statement::For {
+                initialization,
+                condition,
+                post,
+                body,
+                label,
+            } => {
+                writeln!(f, "{}└── For", indent)?;
+                if let Some(init) = initialization {
+                    writeln!(f, "{}    └── Initialization", indent)?;
+                    init.fmt_with_indent(f, &format!("{}        ", indent))?;
+                }
+                if let Some(cond) = condition {
+                    writeln!(f, "{}    └── Condition", indent)?;
+                    cond.fmt_with_indent(f, &format!("{}        ", indent))?;
+                }
+                if let Some(post_expr) = post {
+                    writeln!(f, "{}    └── PostExpression", indent)?;
+                    post_expr.fmt_with_indent(f, &format!("{}        ", indent))?;
+                }
+                if let Some(label) = label {
+                    writeln!(f, "{}    └── Label: {}", indent, label)?;
+                }
+                writeln!(f, "{}    └── Body", indent)?;
+                body.fmt_with_indent(f, &format!("{}        ", indent))
+            }
+            Statement::Break { label: identifier } => {
+                if let Some(label) = identifier {
+                    writeln!(f, "{}└── Break: label {}", indent, label)
+                } else {
+                    writeln!(f, "{}└── Break", indent)
+                }
+            }
+            Statement::Continue { label: identifier } => {
+                if let Some(label) = identifier {
+                    writeln!(f, "{}└── Continue: label {}", indent, label)
+                } else {
+                    writeln!(f, "{}└── Continue", indent)
+                }
             }
             Statement::Null => {
                 writeln!(f, "{}└── Null", indent)
@@ -264,6 +357,32 @@ impl IndentedDisplay for Expression {
                 then_expr.fmt_with_indent(f, &format!("{}        ", indent))?;
                 writeln!(f, "{}    └── ElseExpression", indent)?;
                 else_expr.fmt_with_indent(f, &format!("{}        ", indent))
+            }
+        }
+    }
+}
+
+// For initialization
+#[derive(Debug, Clone)]
+pub enum ForInitialization {
+    InitExpression(Option<Expression>), // It can be empty for no initialization
+    InitDeclaration(Declaration),
+}
+
+impl IndentedDisplay for ForInitialization {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, indent: &str) -> fmt::Result {
+        match self {
+            ForInitialization::InitExpression(expr_opt) => {
+                writeln!(f, "{}└── InitExpression", indent)?;
+                if let Some(expr) = expr_opt {
+                    expr.fmt_with_indent(f, &format!("{}    ", indent))
+                } else {
+                    writeln!(f, "{}    └── None", indent)
+                }
+            }
+            ForInitialization::InitDeclaration(decl) => {
+                writeln!(f, "{}└── InitDeclaration", indent)?;
+                decl.fmt_with_indent(f, &format!("{}    ", indent))
             }
         }
     }

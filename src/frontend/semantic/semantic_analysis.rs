@@ -1,6 +1,8 @@
-use crate::frontend::program_ast::{Block, BlockItem, Declaration, ProgramAst};
+use crate::frontend::program_ast::{Block, BlockItem, Declaration, ForInitialization, ProgramAst};
 use crate::frontend::semantic::symbol_table::SymbolTable;
+use crate::utils::tmp_var_counter::TMP_VAR_COUNT;
 use crate::{Expression, FunctionDefinition, Statement};
+use std::sync::atomic::Ordering::SeqCst;
 
 //todo: Implement panic mode for error handling?
 
@@ -8,8 +10,150 @@ pub fn run_semantic_analysis(program_ast: ProgramAst) -> Result<ProgramAst, Stri
     let mut symbol_table = SymbolTable::new();
 
     // Step 1: Variable resolution
-    Ok(resolve_variables(program_ast, &mut symbol_table)?)
+    let resolved_ast = resolve_variables(program_ast, &mut symbol_table)?;
+    // Step 2: Loop labeling
+    Ok(label_loops(resolved_ast)?)
 }
+
+// #region loop Labeling
+fn create_loop_label() -> String {
+    format!("loop_{}", TMP_VAR_COUNT.fetch_add(1, SeqCst))
+}
+
+fn label_loops(ast: ProgramAst) -> Result<ProgramAst, String> {
+    let ProgramAst::Program(function) = ast;
+    let FunctionDefinition::Function { identifier, body } = function;
+    let Block { items } = body;
+    let mut new_items = Vec::new();
+    for item in items {
+        match item {
+            BlockItem::Statement(stmt) => {
+                new_items.push(BlockItem::Statement(label_loops_in_statement(stmt, None)?));
+            }
+            _ => {
+                new_items.push(item);
+            }
+        }
+    }
+    Ok(ProgramAst::Program(FunctionDefinition::Function {
+        identifier,
+        body: Block { items: new_items },
+    }))
+}
+
+fn label_loops_in_statement(
+    stmt: Statement,
+    current_label: Option<String>,
+) -> Result<Statement, String> {
+    match stmt {
+        Statement::DoWhile {
+            body,
+            condition,
+            label: None,
+        } => {
+            let label = create_loop_label();
+            let labeled_body = label_loops_in_statement(*body, Some(label.clone()))?;
+            Ok(Statement::DoWhile {
+                body: Box::new(labeled_body),
+                condition,
+                label: Some(label),
+            })
+        }
+        Statement::While {
+            condition,
+            body,
+            label: None,
+        } => {
+            let label = create_loop_label();
+            let labeled_body = label_loops_in_statement(*body, Some(label.clone()))?;
+            Ok(Statement::While {
+                condition,
+                body: Box::new(labeled_body),
+                label: Some(label),
+            })
+        }
+        Statement::For {
+            initialization,
+            condition,
+            post,
+            body,
+            ..
+        } => {
+            let label = create_loop_label();
+            let labeled_body = label_loops_in_statement(*body, Some(label.clone()))?;
+            Ok(Statement::For {
+                initialization,
+                condition,
+                post,
+                body: Box::new(labeled_body),
+                label: Some(label),
+            })
+        }
+        Statement::CompoundStatement(block) => {
+            let Block { items } = block;
+            let mut new_items = Vec::new();
+            for item in items {
+                match item {
+                    BlockItem::Statement(s) => {
+                        new_items.push(BlockItem::Statement(label_loops_in_statement(
+                            s,
+                            current_label.clone(),
+                        )?));
+                    }
+                    _ => {
+                        new_items.push(item);
+                    }
+                }
+            }
+            Ok(Statement::CompoundStatement(Block { items: new_items }))
+        }
+        Statement::Break { label: None } => {
+            if let Some(label) = current_label {
+                Ok(Statement::Break {
+                    label: Some(format!("break_{}", label)),
+                })
+            } else {
+                Err("Break statement not within a loop".to_string())
+            }
+        }
+        Statement::Break { label: Some(id) } => panic!(
+            "Break statement should have been labeled already: {}. This is a compiler bug.",
+            id
+        ),
+        Statement::Continue { label: None } => {
+            if let Some(label) = current_label {
+                Ok(Statement::Continue {
+                    label: Some(format!("continue_{}", label)),
+                })
+            } else {
+                Err("Continue statement not within a loop".to_string())
+            }
+        }
+        Statement::Continue { label: Some(id) } => panic!(
+            "Continue statement should have been labeled already: {}. This is a compiler bug.",
+            id
+        ),
+        Statement::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => Ok(Statement::If {
+            condition,
+            then_branch: Box::new(label_loops_in_statement(
+                *then_branch,
+                current_label.clone(),
+            )?),
+            else_branch: else_branch
+                .map(|else_stmt| {
+                    label_loops_in_statement(*else_stmt, current_label.clone()).map(Box::new)
+                })
+                .transpose()?,
+        }),
+        _ => Ok(stmt),
+    }
+}
+
+// # endregion
 
 // #region Variable Resolution
 
@@ -127,6 +271,64 @@ fn resolve_statement(stmt: Statement, symbol_table: &mut SymbolTable) -> Result<
             block,
             symbol_table,
         )?)),
+        Statement::DoWhile {
+            body,
+            condition,
+            label,
+        } => Ok(Statement::DoWhile {
+            body: Box::new(resolve_statement(*body, symbol_table)?),
+            condition: resolve_expression(condition, symbol_table)?,
+            label: label,
+        }),
+        Statement::While {
+            condition,
+            body,
+            label,
+        } => Ok(Statement::While {
+            condition: resolve_expression(condition, symbol_table)?,
+            body: Box::new(resolve_statement(*body, symbol_table)?),
+            label: label,
+        }),
+        Statement::For {
+            initialization,
+            condition,
+            post,
+            body,
+            label,
+        } => {
+            symbol_table.enter_scope(); // New scope for for-loop
+            let resolved_initialization = initialization
+                .map(|for_init| match for_init {
+                    ForInitialization::InitExpression(expr) => expr
+                        .map(|e| resolve_expression(e, symbol_table))
+                        .transpose()
+                        .map(ForInitialization::InitExpression),
+                    ForInitialization::InitDeclaration(decl) => {
+                        resolve_declaration(decl, symbol_table)
+                            .map(ForInitialization::InitDeclaration)
+                    }
+                })
+                .transpose()?;
+            let resolved_condition = condition
+                .map(|cond| resolve_expression(cond, symbol_table))
+                .transpose()?;
+            let resolved_post = post
+                .map(|p| resolve_expression(p, symbol_table))
+                .transpose()?;
+            let resolved_body = Box::new(resolve_statement(*body, symbol_table)?);
+
+            symbol_table.exit_scope();
+
+            Ok(Statement::For {
+                initialization: resolved_initialization,
+                condition: resolved_condition,
+                post: resolved_post,
+                body: resolved_body,
+                label: label,
+            })
+        }
+        Statement::Break { label: identifier } => Ok(Statement::Break { label: identifier }),
+        Statement::Continue { label: identifier } => Ok(Statement::Continue { label: identifier }),
     }
 }
 

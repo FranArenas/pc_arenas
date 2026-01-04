@@ -81,7 +81,7 @@ fn compile(
     let raw_ast = parse(tokens)?;
 
     if cli.print_raw_program_ast {
-        println!("Program AST:\n");
+        println!("Unvalidated program AST:\n");
         println!("{}", raw_ast.clone());
     }
 

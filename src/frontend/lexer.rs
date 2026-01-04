@@ -74,6 +74,13 @@ pub enum TokenType {
     QuestionMark,
     Colon,
 
+    // Loops
+    DoKeyword,
+    WhileKeyword,
+    ForKeyword,
+    BreakKeyword,
+    ContinueKeyword,
+
     // End of file
     EndOfFile,
 }
@@ -284,6 +291,21 @@ pub fn tokenize(input: &str) -> (Vec<Token>, Vec<LexError>) {
                     "else" => {
                         tokens.push(Token::new(TokenType::ElseKeyword, lexer.row, start_column))
                     }
+                    "do" => tokens.push(Token::new(TokenType::DoKeyword, lexer.row, start_column)),
+                    "while" => {
+                        tokens.push(Token::new(TokenType::WhileKeyword, lexer.row, start_column))
+                    }
+                    "for" => {
+                        tokens.push(Token::new(TokenType::ForKeyword, lexer.row, start_column))
+                    }
+                    "break" => {
+                        tokens.push(Token::new(TokenType::BreakKeyword, lexer.row, start_column))
+                    }
+                    "continue" => tokens.push(Token::new(
+                        TokenType::ContinueKeyword,
+                        lexer.row,
+                        start_column,
+                    )),
                     _ => tokens.push(Token::new(
                         TokenType::Identifier(identifier),
                         lexer.row,

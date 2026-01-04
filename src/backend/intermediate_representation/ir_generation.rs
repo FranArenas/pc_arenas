@@ -2,13 +2,11 @@ use crate::backend::intermediate_representation::ir_definition::{
     BinaryOperatorIR, FunctionDefinitionIR, InstructionIR, ProgramIR, UnaryOperatorIR, ValueIR,
 };
 use crate::frontend::program_ast::{
-    BinaryOperator, BlockItem, CompoundAssignmentOperator, Declaration, Expression,
-    FunctionDefinition, ProgramAst, Statement, UnaryOperator,
+    BinaryOperator, Block, BlockItem, CompoundAssignmentOperator, Declaration, Expression,
+    ForInitialization, FunctionDefinition, ProgramAst, Statement, UnaryOperator,
 };
 use crate::utils::tmp_var_counter::TMP_VAR_COUNT;
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-static LABEL_MANGLE_COUNT: AtomicUsize = AtomicUsize::new(0);
+use std::sync::atomic::Ordering;
 
 /// Generates a unique temporary variable name
 fn generate_tmp_var_name(prefix: Option<&str>) -> String {
@@ -21,7 +19,7 @@ fn generate_tmp_var_name(prefix: Option<&str>) -> String {
 
 /// Adds a unique suffix to the given label name to avoid conflicts with other labels
 fn add_suffix_to_label_name(label: &str) -> String {
-    let id = LABEL_MANGLE_COUNT.fetch_add(1, Ordering::Relaxed); // increment atomically
+    let id = TMP_VAR_COUNT.fetch_add(1, Ordering::Relaxed); // increment atomically
     format!("{}.{}", label, id) // Add period + number to avoid conflicts with labels
 }
 
@@ -78,14 +76,49 @@ fn process_statement_ir(stmt: Statement, instructions: &mut Vec<InstructionIR>) 
             process_block_ir(block, instructions);
             None
         }
+        Statement::Break { label: identifier } => {
+            instructions.push(InstructionIR::JumpIR {
+                label_identifier: identifier.expect("The break label must be present in the IR generation phase. This is a compiler bug, the label was not created in the semantic analysis phase."),
+            });
+            None
+        }
+        Statement::Continue { label: identifier } => {
+            instructions.push(InstructionIR::JumpIR {
+                label_identifier: identifier.expect("The continue label must be present in the IR generation phase. This is a compiler bug, the label was not created in the semantic analysis phase."),
+            });
+            None
+        }
+        Statement::DoWhile {
+            body,
+            condition,
+            label,
+        } => {
+            process_do_while_ir(body, condition, label, instructions);
+            None
+        }
+        Statement::While {
+            condition,
+            body,
+            label,
+        } => {
+            process_while_ir(condition, body, label, instructions);
+            None
+        }
+        Statement::For {
+            initialization,
+            condition,
+            post,
+            body,
+            label,
+        } => {
+            process_for_ir(initialization, condition, post, body, label, instructions);
+            None
+        }
         Statement::Null => None,
     }
 }
 
-fn process_block_ir(
-    block: crate::frontend::program_ast::Block,
-    instructions: &mut Vec<InstructionIR>,
-) {
+fn process_block_ir(block: Block, instructions: &mut Vec<InstructionIR>) {
     for item in block.items {
         match item {
             BlockItem::Declaration(decl) => {
@@ -96,6 +129,119 @@ fn process_block_ir(
             }
         }
     }
+}
+
+fn process_do_while_ir(
+    body: Box<Statement>,
+    condition: Expression,
+    label: Option<String>,
+    instructions: &mut Vec<InstructionIR>,
+) {
+    let label = label.expect("Label must be present in do-while loop in the IR generation phase. This is a compiler bug, the label was not created in the semantic analysis phase.");
+    
+    instructions.push(InstructionIR::LabelIR {
+        identifier: label.clone(),
+    });
+    
+    process_statement_ir(*body, instructions);
+
+    // Add continue label. The format matches the one used in semantic analysis.
+    instructions.push(InstructionIR::LabelIR {
+        identifier: format!("continue_{}", label.clone()),
+    });
+
+    let condition_val = process_expression_ir(condition, instructions);
+    instructions.push(InstructionIR::JumpIfNotZeroIR {
+        condition: condition_val,
+        label_identifier: label.clone(),
+    });
+    // Add break label. The format matches the one used in semantic analysis.
+    instructions.push(InstructionIR::LabelIR {
+        identifier: format!("break_{}", label),
+    });
+}
+
+fn process_while_ir(
+    condition: Expression,
+    body: Box<Statement>,
+    label: Option<String>,
+    instructions: &mut Vec<InstructionIR>,
+) {
+    let label = label.expect("Label must be present in while loop in the IR generation phase. This is a compiler bug, the label was not created in the semantic analysis phase.");
+
+    instructions.push(InstructionIR::LabelIR {
+        identifier: label.clone(),
+    });
+    let condition_val = process_expression_ir(condition, instructions);
+    instructions.push(InstructionIR::JumpIfZeroIR {
+        condition: condition_val,
+        label_identifier: format!("break_{}", label.clone()),
+    });
+    process_statement_ir(*body, instructions);
+    // Add continue label. The format matches the one used in semantic analysis.
+    instructions.push(InstructionIR::LabelIR {
+        identifier: format!("continue_{}", label.clone()),
+    });
+    instructions.push(InstructionIR::JumpIR {
+        label_identifier: label.clone(),
+    });
+    // Add break label. The format matches the one used in semantic analysis.
+    instructions.push(InstructionIR::LabelIR {
+        identifier: format!("break_{}", label),
+    });
+}
+
+fn process_for_ir(
+    initialization: Option<ForInitialization>,
+    condition: Option<Expression>,
+    post: Option<Expression>,
+    body: Box<Statement>,
+    label: Option<String>,
+    instructions: &mut Vec<InstructionIR>,
+) {
+    let label = label.expect("Label must be present in for loop in the IR generation phase. This is a compiler bug, the label was not created in the semantic analysis phase.");
+
+    // Initialization
+    if let Some(init) = initialization {
+        match init {
+            ForInitialization::InitExpression(expr) => {
+                if let Some(e) = expr {
+                    process_expression_ir(e, instructions);
+                }
+            }
+            ForInitialization::InitDeclaration(decl) => {
+                process_declaration_ir(decl, instructions);
+            }
+        }
+    }
+
+    instructions.push(InstructionIR::LabelIR {
+        identifier: label.clone(),
+    });
+    // Condition
+    if let Some(cond_expr) = condition {
+        let condition_val = process_expression_ir(cond_expr, instructions);
+        instructions.push(InstructionIR::JumpIfZeroIR {
+            condition: condition_val,
+            label_identifier: format!("break_{}", label.clone()),
+        });
+    }
+    process_statement_ir(*body, instructions);
+    // Add continue label. The format matches the one used in semantic analysis.
+    instructions.push(InstructionIR::LabelIR {
+        identifier: format!("continue_{}", label.clone()),
+    });
+    // Post expression
+    if let Some(post_expr) = post {
+        process_expression_ir(post_expr, instructions);
+    }
+    instructions.push(InstructionIR::JumpIR {
+        label_identifier: label.clone(),
+    });
+    // Add break label. The format matches the one used in semantic analysis.
+    instructions.push(InstructionIR::LabelIR {
+        identifier: format!("break_{}", label),
+    });
 }
 
 fn process_if_ir(

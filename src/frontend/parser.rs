@@ -4,7 +4,7 @@ use std::mem::discriminant;
 use crate::frontend::lexer::{Token, TokenType};
 use crate::frontend::program_ast::{
     BinaryOperator, Block, BlockItem, CompoundAssignmentOperator, Declaration, Expression,
-    FunctionDefinition, ProgramAst, Statement, UnaryOperator,
+    ForInitialization, FunctionDefinition, ProgramAst, Statement, UnaryOperator,
 };
 
 #[derive(Debug, Clone)]
@@ -187,6 +187,95 @@ impl<'a> Parser<'a> {
             TokenType::OpenBrace => {
                 return Ok(Statement::CompoundStatement(self.parse_block()?));
             }
+            TokenType::DoKeyword => {
+                self.advance(); // Consume 'do'
+
+                let body = Box::new(self.parse_statement()?);
+
+                self.consume(TokenType::WhileKeyword, "Expected 'while' after 'do' body")?;
+                self.consume(TokenType::OpenParen, "Expected '(' after 'while'")?;
+                let condition = self.parse_expression(0)?; // Minimum precedence is 0
+                self.consume(
+                    TokenType::CloseParen,
+                    "Expected ')' after do-while condition",
+                )?;
+                self.consume(
+                    TokenType::Semicolon,
+                    "Expected semicolon after do-while statement",
+                )?;
+
+                return Ok(Statement::DoWhile {
+                    body,
+                    condition,
+                    label: None,
+                });
+            }
+            TokenType::WhileKeyword => {
+                self.advance(); // Consume 'while'
+                self.consume(TokenType::OpenParen, "Expected '(' after 'while'")?;
+                let condition = self.parse_expression(0)?; // Minimum precedence is 0
+                self.consume(TokenType::CloseParen, "Expected ')' after while condition")?;
+
+                let body = Box::new(self.parse_statement()?);
+
+                return Ok(Statement::While {
+                    condition,
+                    body,
+                    label: None,
+                });
+            }
+            TokenType::BreakKeyword => {
+                self.advance(); // Consume 'break'
+                self.consume(
+                    TokenType::Semicolon,
+                    "Expected semicolon after break statement",
+                )?;
+                return Ok(Statement::Break { label: None });
+            }
+            TokenType::ContinueKeyword => {
+                self.advance(); // Consume 'continue'
+                self.consume(
+                    TokenType::Semicolon,
+                    "Expected semicolon after continue statement",
+                )?;
+                return Ok(Statement::Continue { label: None });
+            }
+            TokenType::ForKeyword => {
+                self.advance(); // Consume 'for'
+                self.consume(TokenType::OpenParen, "Expected '(' after 'for'")?;
+
+                let initialization = self.parse_for_initialization()?;
+
+                let condition = if self.current_token().token_type != TokenType::Semicolon {
+                    Some(self.parse_expression(0)?) // Minimum precedence is 0
+                } else {
+                    None
+                };
+                self.consume(
+                    TokenType::Semicolon,
+                    "Expected ';' after for loop condition",
+                )?;
+
+                let post = if self.current_token().token_type != TokenType::CloseParen {
+                    Some(self.parse_expression(0)?) // Minimum precedence is 0
+                } else {
+                    None
+                };
+                self.consume(
+                    TokenType::CloseParen,
+                    "Expected ')' after for loop post expression",
+                )?;
+
+                let body = Box::new(self.parse_statement()?);
+
+                return Ok(Statement::For {
+                    initialization,
+                    condition,
+                    post,
+                    body,
+                    label: None,
+                });
+            }
             _ => {
                 // Parse expressions statement. Only used for expressions with side effects
                 let expr = self.parse_expression(0)?; // Minimum precedence is 0
@@ -263,7 +352,6 @@ impl<'a> Parser<'a> {
         // Postfix Operators are special as they can be chained
         // In the case of ++-- is invalid semantically but not syntactically. It will be handled in semantic analysis as invalid.
         loop {
-            //todo: Implement this in the semantic analysis phase todo: variable resolution chapter 6
             match self.current_token().token_type {
                 TokenType::Increment => {
                     self.advance();
@@ -349,6 +437,34 @@ impl<'a> Parser<'a> {
         }
 
         Ok(left_expr)
+    }
+
+    fn parse_for_initialization(&mut self) -> Result<Option<ForInitialization>, ParseError> {
+        let value;
+        match self.current_token().token_type {
+            TokenType::Semicolon => {
+                // No initialization
+                value = Ok(None)
+            }
+            TokenType::IntKeyword => {
+                // Declaration initialization
+                let declaration = self.parse_declaration()?; // The semicolon is consumed inside parse_declaration
+                return Ok(Some(ForInitialization::InitDeclaration(declaration)));
+            }
+            _ => {
+                // Expression initialization
+                let expr = Some(self.parse_expression(0)?); // Minimum precedence is 0
+                value = Ok(Some(ForInitialization::InitExpression(expr)))
+            }
+        }
+        self.consume(
+            TokenType::Semicolon,
+            &format!(
+                "Expected ';' after for loop initialization. Got: {:?}",
+                self.current_token().token_type
+            ),
+        )?;
+        value
     }
 
     fn parse_unary_operator(&mut self) -> Result<UnaryOperator, ParseError> {
